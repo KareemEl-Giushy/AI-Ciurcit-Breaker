@@ -1,0 +1,183 @@
+# ==============================================================================
+# ⚡ CIRCUIT BREAKER & INSPECTOR REVERSE PROXY CONFIGURATION REFERENCE
+# ==============================================================================
+# This configuration file documents all parameters supported by the Circuit
+# Breaker Reverse Proxy. Each parameter lists its YAML key, CLI flag, environment
+# variable, default value, and comprehensive guidance.
+#
+# Configuration Priority:
+#   1. CLI Flags (e.g. -port 9000 -target http://api.openai.com)
+#   2. Environment Variables (e.g. PORT=9000 TARGET_URL=http://api.openai.com)
+#   3. Configuration File / Defaults
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. SERVER & REVERSE PROXY ROUTING
+# ------------------------------------------------------------------------------
+server:
+  # Port the reverse proxy listens on for incoming HTTP/SSE requests.
+  # CLI Flag : -port
+  # Env Var  : PORT
+  # Default  : "8080"
+  port: "8080"
+
+  # Upstream destination target URL where requests are transparently forwarded.
+  # Supports full path and query preservation, real-time SSE chunk forwarding,
+  # and edge request body restoration.
+  # CLI Flag : -target
+  # Env Var  : TARGET_URL
+  # Default  : "http://localhost:3000"
+  # Examples : "http://localhost:11434" (Ollama) | "https://api.openai.com"
+  target_url: "http://localhost:3000"
+
+  # Logging level verbosity for structured stdout text logs.
+  # Options  : "DEBUG", "INFO", "WARN", "ERROR"
+  # CLI Flag : -log-level
+  # Env Var  : LOG_LEVEL
+  # Default  : "INFO"
+  log_level: "INFO"
+
+
+# ------------------------------------------------------------------------------
+# 2. SLIDING WINDOW INSPECTOR (Rate & Token Limiting)
+# ------------------------------------------------------------------------------
+# Tracks request throughput and cumulative token heuristics over a rolling window.
+sliding_window:
+  # Duration of the rolling time window used for request & token aggregation.
+  # Stale entries outside this duration are automatically evicted.
+  # CLI Flag : -window-duration
+  # Env Var  : WINDOW_DURATION
+  # Default  : "60s"
+  # Formats  : "30s", "1m", "5m", "1h"
+  window_duration: "60s"
+
+  # Maximum number of HTTP requests allowed across the sliding window.
+  # Set to 0 to disable request limit enforcement.
+  # CLI Flag : -window-max-requests
+  # Env Var  : WINDOW_MAX_REQUESTS
+  # Default  : 0 (unlimited)
+  max_requests: 0
+
+  # Maximum estimated token usage allowed across the sliding window.
+  # Computed using fast character heuristics (~4 chars/token) across messages.
+  # Set to 0 to disable token limit enforcement.
+  # CLI Flag : -window-max-tokens
+  # Env Var  : WINDOW_MAX_TOKENS
+  # Default  : 0 (unlimited)
+  max_tokens: 0
+
+  # When set to true, requests exceeding max_requests or max_tokens will be
+  # rejected immediately at the edge with HTTP 429 Too Many Requests.
+  # When false, metrics are calculated and logged without blocking.
+  # CLI Flag : -enforce-limits
+  # Env Var  : ENFORCE_LIMITS
+  # Default  : false
+  enforce_limits: false
+
+
+# ------------------------------------------------------------------------------
+# 3. CIRCUIT BREAKER (Tool Looping & Error Accumulation Engine)
+# ------------------------------------------------------------------------------
+# Monitors autonomous agent tool calls in real-time SSE streams and conversation
+# histories to catch infinite recursion, mutated prompts, and error storms.
+circuit_breaker:
+  # Master toggle to enable or disable Circuit Breaker evaluation.
+  # CLI Flag : -cb-enabled
+  # Env Var  : CB_ENABLED
+  # Default  : true
+  enabled: true
+
+  # Class A Repetition Limit:
+  # Maximum allowed identical or near-duplicate tool calls in the active window.
+  # Once reached, the breaker trips (OPEN_TRIPPED), terminates live SSE streams,
+  # and rejects incoming requests at the edge with HTTP 429 and structured SRE JSON.
+  # CLI Flag : -cb-class-a-limit
+  # Env Var  : CB_CLASS_A_LIMIT
+  # Default  : 3
+  class_a_limit: 3
+
+  # Class B Error Accumulation Limit:
+  # Maximum allowed tool execution errors (e.g. timeouts, permission denied,
+  # exception traces) in the active window before tripping the breaker.
+  # CLI Flag : -cb-class-b-limit
+  # Env Var  : CB_CLASS_B_LIMIT
+  # Default  : 4
+  class_b_limit: 4
+
+  # SimHash Maximum Hamming Distance (Locality-Sensitive Hashing):
+  # Modern LLMs mutate prompts slightly during loops (e.g. "(attempt 0)" vs "(attempt 1)").
+  # 64-bit SimHash (via github.com/go-dedup/simhash) computes bitwise Hamming distance.
+  # If two tool calls share the tool name and have <= max_hamming_distance differing bits,
+  # they are treated as duplicate loop calls.
+  # Range    : 0 to 64 bits (3 bits corresponds to ~95.3% similarity)
+  # CLI Flag : -cb-max-hamming-dist
+  # Env Var  : CB_MAX_HAMMING_DIST
+  # Default  : 3
+  max_hamming_distance: 3
+
+  # Jaccard Similarity Threshold:
+  # Evaluates character 3-gram (k-shingle) token set overlap: J(A, B) = |A ∩ B| / |A ∪ B|.
+  # Catches argument variations exceeding this similarity index.
+  # Range    : 0.0 to 1.0 (1.0 = exact match)
+  # CLI Flag : -cb-jaccard-threshold
+  # Env Var  : CB_JACCARD_THRESHOLD
+  # Default  : 0.85
+  jaccard_threshold: 0.85
+
+
+# ------------------------------------------------------------------------------
+# 4. VELOCITY DETECTION (High-Frequency Throughput & Hammering Prevention)
+# ------------------------------------------------------------------------------
+# Detects anomalous high-frequency request rates per session that exceed normal
+# human or expected agent pacing, preventing denial-of-service and runaway loops.
+velocity:
+  # Master toggle to enable or disable Velocity Detection.
+  # CLI Flag : -velocity-enabled
+  # Env Var  : VELOCITY_ENABLED
+  # Default  : true
+  enabled: true
+
+  # Maximum Requests Per Second (RPS) per session over a 1-second rolling window.
+  # If an agent session exceeds this rate, requests are blocked with HTTP 429.
+  # Set to 0 to disable RPS checking.
+  # CLI Flag : -velocity-max-rps
+  # Env Var  : VELOCITY_MAX_RPS
+  # Default  : 5.0
+  max_rps: 5.0
+
+  # Maximum Endpoint Repeat Hits:
+  # Maximum times a single session is allowed to hit the EXACT SAME endpoint
+  # within the repeat_window duration.
+  # Set to 0 to disable endpoint repeat checking.
+  # CLI Flag : -velocity-max-endpoint-repeats
+  # Env Var  : VELOCITY_MAX_ENDPOINT_REPEATS
+  # Default  : 20
+  max_endpoint_repeats: 20
+
+  # Time window used to track endpoint repeat counts.
+  # CLI Flag : -velocity-repeat-window
+  # Env Var  : VELOCITY_REPEAT_WINDOW
+  # Default  : "10s"
+  # Formats  : "5s", "10s", "30s", "1m"
+  repeat_window: "10s"
+
+
+# ------------------------------------------------------------------------------
+# 5. CONVERSATION PERSISTENCE & AUDIT STORAGE
+# ------------------------------------------------------------------------------
+# Persists all multi-turn conversation payloads, streamed tool calls, response
+# texts, and Shannon token entropy calculations to structured JSON audit files.
+storage:
+  # Master toggle to save structured JSON conversation audit logs.
+  # CLI Flag : -save-conversations
+  # Env Var  : SAVE_CONVERSATIONS
+  # Default  : true
+  save_conversations: true
+
+  # Directory path where conversation JSON records are written.
+  # Files are formatted as: conv_<YYYYMMDD_HHMMSS>_<random_id>.json
+  # CLI Flag : -save-dir
+  # Env Var  : CONVERSATIONS_DIR
+  # Default  : "./conversations"
+  conversations_dir: "./conversations"
+

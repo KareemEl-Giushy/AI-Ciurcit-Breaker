@@ -1,0 +1,7 @@
+learning/
+go.sum
+proxy-server
+config.yaml
+utils/*_test.go
+conversations/*
+!conversations/.gitkeep
