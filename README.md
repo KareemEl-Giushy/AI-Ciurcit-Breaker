@@ -21,10 +21,14 @@ It intercepts requests across any URL path and query string, reads and parses Op
 - **Tool Repetition & Error Accumulation Circuit Breakers**:
   - **Tool Repetition Loop**: Halts identical or SimHash near-duplicate tool-call recursion (default limit: `3`).
   - **Tool Error Accumulation**: Blocks cascading tool failures and error retry storms (default limit: `4`).
+- **Deep Incident Diagnostics with Violating Tools & Arguments**:
+  - Emits structured SRE incident JSON (`HTTP 429`) and terminal alerts containing the exact **triggering tool**, **trigger arguments**, and full chronological **list of violating tool calls and arguments** with distance/similarity scores.
 - **Active Stream Termination & Structured SRE JSON**: Immediately halts runaway streams and returns structured SRE incident JSON with root-cause diagnostics, observed count, and mitigation instructions.
 - **Zero-Allocation Stream Entropy Engine**: Computes real-time Shannon entropy ($0.0 - 8.0$ bits/byte) on incoming token and byte streams with $0\text{ B/op}$ heap allocations to detect model degeneration.
-- **Conversation History Visualizer**: Pretty-prints the most recent interaction turn with color-coded role badges (⚙️ System, 👤 User, 🤖 Assistant, 🛠️ Tool output).
-- **Structured JSON Persistence**: Automatically logs and saves each full transaction into structured indented JSON files (`./conversations/conv_*.json`).
+- **Visual Sliding Window Terminal Dashboard**:
+  - Shows request & token progress meters, model breakdown, real-time Shannon stream entropy, and the active running tool call with arguments.
+- **Client IP-Based Multi-Turn Conversation Persistence**:
+  - Automatically tracks client IP to group and append consecutive interactions from the same client into a single session file (`./conversations/conv_<timestamp>_<client_ip>_<id>.json`) even if requests are stateless.
 - **Thread-Safe Sliding Window**:
   - Tracks request counts, token estimates, and model distributions across a rolling time window (e.g. last 60 seconds).
   - Automatically evicts expired requests as the window slides.

@@ -192,7 +192,7 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
 Maintains thread-safe rolling history of tool calls:
 - **Tool Repetition Loop (`TOOL_CALL_REPETITION_LOOP`)**: Trips when identical or SimHash near-duplicate tool calls ($D_H \le 3$) reach `MaxToolRepeats` (default: 3).
 - **Tool Error Accumulation (`TOOL_ERROR_ACCUMULATION`)**: Trips when accumulated tool failures reach `MaxToolErrors` (default: 4).
-- **Structured SRE Incident**: Emits structured JSON with `IncidentID`, `FailureClass`, `SimHashHex`, `HammingDistance`, `Mitigation`, and `ActionRequired`.
+- **Structured SRE Incident with Violating Calls Breakdown**: Emits structured JSON and terminal alerts with `IncidentID`, `FailureClass`, `ToolName`, `ToolArguments`, `ViolatingCalls` (array of participating tool names, arguments, SimHash distance, and similarity scores), `Mitigation`, and `ActionRequired`.
 
 ---
 
@@ -242,7 +242,10 @@ Tracks aggregate proxy metrics over a rolling window (e.g. 60 seconds):
 **Location**: [`inspector/storage.go`](file:///home/kareem/Documents/DevOps%20Hackathon/Circuit%20Breaker/inspector/storage.go)
 
 #### What it does:
-Saves structured JSON conversation audit logs to `./conversations/conv_<timestamp>_<id>.json`.
+Manages persistent multi-turn conversation storage:
+- Automatically tracks **client IP** (stripping ephemeral connection ports) to group consecutive interaction turns into the **same conversation file** (`./conversations/conv_<timestamp>_<client_ip>_<id>.json`).
+- Appends successive turns into the `turns: [...]` array even if client API calls are stateless (omitting older conversation history).
+- Isolates different client IPs into their own distinct conversation audit files.
 
 ---
 
@@ -252,7 +255,7 @@ Saves structured JSON conversation audit logs to `./conversations/conv_<timestam
 - **`colors.go`**: ANSI styling codes.
 - **`env.go`**: Safe environment variable parsers.
 - **`config.go`**: YAML loader and configuration validator.
-- **`printer.go`**: Centralized terminal formatting, banners, access logs, stream typing, sliding window dashboard, and SRE alert boxes.
+- **`printer.go`**: Centralized terminal formatting, banners, access logs, stream typing, Sliding Window dashboard (with real-time Shannon entropy and active tool call parameters), and detailed SRE alert boxes (with violating calls breakdown).
 
 ---
 

@@ -36,8 +36,8 @@ This repository provides an HTTP Reverse Proxy written in Go designed to:
 │   ├── response_test.go          # Unit tests for SSE chunk processing, tool calls, and conversation formatting
 │   ├── sliding_window.go         # Thread-safe SlidingWindow inspector, rolling time window eviction, metrics
 │   ├── sliding_window_test.go    # Unit tests for JSON unmarshaling, sliding eviction, concurrency
-│   ├── storage.go                # Structured JSON persistence for conversation records and responses
-│   ├── storage_test.go           # Unit tests for conversation record persistence
+│   ├── storage.go                # Multi-turn conversation persistence grouped and appended by client IP
+│   ├── storage_test.go           # Unit tests for multi-turn client IP persistence and session isolation
 │   ├── velocity.go               # Session VelocityDetector enforcing Max RPS and Endpoint Repeat limits
 │   └── velocity_test.go          # Unit tests for session velocity rate limits and endpoint repeat tracking
 ├── utils/
@@ -125,6 +125,8 @@ go vet ./...
 | `-velocity-max-rps` | `VELOCITY_MAX_RPS` | `5.0` | Max allowed requests per second per session (0 = disabled) |
 | `-velocity-max-endpoint-repeats` | `VELOCITY_MAX_ENDPOINT_REPEATS` | `20` | Max hits to same endpoint in window (0 = disabled) |
 | `-velocity-repeat-window` | `VELOCITY_REPEAT_WINDOW` | `10s` | Time window for endpoint repeat tracking |
+| `-save-conversations` | `SAVE_CONVERSATIONS` | `true` | Save structured JSON conversation audit records grouped by client IP |
+| `-save-dir` | `CONVERSATIONS_DIR` | `./conversations` | Directory to store conversation JSON records |
 
 ---
 
