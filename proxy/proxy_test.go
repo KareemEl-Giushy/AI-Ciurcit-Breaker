@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -572,5 +573,80 @@ func TestProxyShowSlidingWindowMode_WithToolCallsAndEntropy(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestProxyMultiTurnConversationPersistence_SameClientIP(t *testing.T) {
+	tempSaveDir := t.TempDir()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-turn","model":"gpt-4","choices":[{"message":{"role":"assistant","content":"Response for turn"}}]}`))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+	handler := NewServerHandler(Config{
+		TargetURL:         backendURL,
+		SaveConversations: true,
+		SaveDir:           tempSaveDir,
+	})
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	client := proxyServer.Client()
+
+	// Send Turn 1
+	payload1 := `{"model":"gpt-4","messages":[{"role":"user","content":"Turn 1 question"}]}`
+	req1, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions", bytes.NewBufferString(payload1))
+	req1.Header.Set("Content-Type", "application/json")
+	resp1, err := client.Do(req1)
+	if err != nil || resp1.StatusCode != http.StatusOK {
+		t.Fatalf("turn 1 failed: %v", err)
+	}
+	resp1.Body.Close()
+
+	// Send Turn 2 without older conversation in messages (e.g. only latest user prompt)
+	payload2 := `{"model":"gpt-4","messages":[{"role":"user","content":"Turn 2 question"}]}`
+	req2, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions", bytes.NewBufferString(payload2))
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, err := client.Do(req2)
+	if err != nil || resp2.StatusCode != http.StatusOK {
+		t.Fatalf("turn 2 failed: %v", err)
+	}
+	resp2.Body.Close()
+
+	// Verify that ONLY ONE file was created for this client IP containing BOTH turns!
+	files, err := os.ReadDir(tempSaveDir)
+	if err != nil {
+		t.Fatalf("failed to read save directory: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected exactly 1 multi-turn conversation file, found %d", len(files))
+	}
+
+	data, err := os.ReadFile(filepath.Join(tempSaveDir, files[0].Name()))
+	if err != nil {
+		t.Fatalf("failed to read saved file: %v", err)
+	}
+
+	var rec inspector.ConversationRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("failed to parse saved JSON: %v", err)
+	}
+
+	if rec.TurnCount != 2 {
+		t.Errorf("expected TurnCount 2, got %d", rec.TurnCount)
+	}
+	if len(rec.Turns) != 2 {
+		t.Fatalf("expected 2 turns in array, got %d", len(rec.Turns))
+	}
+	if rec.Turns[0].Request.Messages[0].Content != "Turn 1 question" {
+		t.Errorf("unexpected turn 0: %+v", rec.Turns[0])
+	}
+	if rec.Turns[1].Request.Messages[0].Content != "Turn 2 question" {
+		t.Errorf("unexpected turn 1: %+v", rec.Turns[1])
 	}
 }

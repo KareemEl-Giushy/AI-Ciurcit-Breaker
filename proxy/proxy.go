@@ -92,6 +92,8 @@ func NewServerHandler(cfg Config) http.Handler {
 		saveDir = "./conversations"
 	}
 
+	storageManager := inspector.NewConversationStorageManager(saveDir, 30*time.Minute)
+
 	windowInspector := cfg.Inspector
 	if windowInspector == nil {
 		windowInspector = inspector.NewSlidingWindow(inspector.SlidingWindowConfig{
@@ -153,16 +155,14 @@ func NewServerHandler(cfg Config) http.Handler {
 				// Register callback for conversation saving and sliding window display
 				reader.SetOnCompleteCallback(func(recorded inspector.RecordedResponse) {
 					if cfg.SaveConversations && info != nil && info.openAIReq != nil {
-						record := &inspector.ConversationRecord{
-							Timestamp:  info.startTime,
-							Path:       info.path,
-							ClientIP:   info.clientIP,
-							DurationMs: time.Since(info.startTime).Milliseconds(),
-							StatusCode: resp.StatusCode,
-							Request:    info.openAIReq,
-							Response:   recorded,
-						}
-						savedPath, err := inspector.SaveConversationRecord(record, saveDir)
+						savedPath, err := storageManager.RecordTurn(
+							info.clientIP,
+							info.path,
+							time.Since(info.startTime).Milliseconds(),
+							resp.StatusCode,
+							info.openAIReq,
+							recorded,
+						)
 						if err != nil {
 							logger.Error("failed to save conversation record", slog.String("error", err.Error()))
 						} else {
@@ -299,11 +299,22 @@ func NewServerHandler(cfg Config) http.Handler {
 			inspector.PrintConversation(openAIReq, r.URL.Path)
 		}
 
+		// Extract clean client IP (without ephemeral port)
+		clientIP := inspector.CleanIPAddress(r.RemoteAddr)
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+				clientIP = strings.TrimSpace(parts[0])
+			}
+		} else if xRealIP := r.Header.Get("X-Real-IP"); xRealIP != "" {
+			clientIP = strings.TrimSpace(xRealIP)
+		}
+
 		// Store request info in context for response recorder
 		info := &requestInfo{
 			openAIReq:   openAIReq,
 			startTime:   start,
-			clientIP:    r.RemoteAddr,
+			clientIP:    clientIP,
 			path:        r.URL.Path,
 			windowStats: stats,
 		}

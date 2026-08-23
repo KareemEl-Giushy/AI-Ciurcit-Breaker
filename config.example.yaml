@@ -173,8 +173,10 @@ velocity:
 # ------------------------------------------------------------------------------
 # 5. CONVERSATION PERSISTENCE & AUDIT STORAGE
 # ------------------------------------------------------------------------------
-# Persists all multi-turn conversation payloads, streamed tool calls, response
+# Persists multi-turn conversation payloads, streamed tool calls, response
 # texts, and Shannon token entropy calculations to structured JSON audit files.
+# Automatically tracks client IP to group and append consecutive turns from the
+# same client into a single conversation file even if client messages are stateless.
 storage:
   # Master toggle to save structured JSON conversation audit logs.
   # CLI Flag : -save-conversations
@@ -183,7 +185,7 @@ storage:
   save_conversations: true
 
   # Directory path where conversation JSON records are written.
-  # Files are formatted as: conv_<YYYYMMDD_HHMMSS>_<random_id>.json
+  # Files are formatted as: conv_<YYYYMMDD_HHMMSS>_<client_ip>_<random_id>.json
   # CLI Flag : -save-dir
   # Env Var  : CONVERSATIONS_DIR
   # Default  : "./conversations"
