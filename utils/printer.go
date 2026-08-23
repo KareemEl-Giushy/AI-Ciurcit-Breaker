@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -24,11 +25,22 @@ type PrintMessage struct {
 	FunctionArgs string
 }
 
+// SREViolatingCall contains tool and argument details for a violating invocation.
+type SREViolatingCall struct {
+	ToolName  string
+	Arguments string
+	Error     string
+	Distance  int
+	Score     float64
+}
+
 // SREIncidentSummary contains incident details for formatted terminal alerts.
 type SREIncidentSummary struct {
 	IncidentID      string
 	FailureClass    string
 	ToolName        string
+	ToolArguments   string
+	ViolatingCalls  []SREViolatingCall
 	Fingerprint     string
 	SimHashHex      string
 	HammingDistance int
@@ -40,7 +52,7 @@ type SREIncidentSummary struct {
 }
 
 // PrintStartupBanner outputs the stylized ASCII application banner and active configuration settings.
-func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTok int, enforce bool, cbClassA, cbClassB, cbHamming int, cbJaccard float64, maxRPS float64, maxEndpointRepeats int, repeatWindow time.Duration, saveConv bool, saveDir string) {
+func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTok int, enforce bool, cbMaxToolRepeats, cbMaxToolErrors, cbHamming int, cbJaccard float64, maxRPS float64, maxEndpointRepeats int, repeatWindow time.Duration, saveConv bool, saveDir string) {
 	fmt.Printf("\n%s%s╔══════════════════════════════════════════════════════════════════════════════╗%s\n", ColorCyan, ColorBold, ColorReset)
 	fmt.Printf("%s%s║                ⚡ CIRCUIT BREAKER REVERSE PROXY & INSPECTOR                 ║%s\n", ColorCyan, ColorBold, ColorReset)
 	fmt.Printf("%s%s╚══════════════════════════════════════════════════════════════════════════════╝%s\n", ColorCyan, ColorBold, ColorReset)
@@ -50,10 +62,10 @@ func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTo
 	fmt.Printf("  %s• Max Window Requests:%s %d (0 = unlimited)\n", ColorBold, ColorReset, maxReq)
 	fmt.Printf("  %s• Max Window Tokens  :%s %d (0 = unlimited)\n", ColorBold, ColorReset, maxTok)
 	fmt.Printf("  %s• Limit Enforcement  :%s %t\n", ColorBold, ColorReset, enforce)
-	fmt.Printf("  %s• CB Class A Limit   :%s %d identical/similar calls\n", ColorBold, ColorReset, cbClassA)
+	fmt.Printf("  %s• CB Tool Loop Limit :%s %d identical/similar calls\n", ColorBold, ColorReset, cbMaxToolRepeats)
 	fmt.Printf("  %s• CB SimHash Max Dist:%s %d bits (64-bit LSH)\n", ColorBold, ColorReset, cbHamming)
 	fmt.Printf("  %s• CB Jaccard Thresh  :%s %.2f similarity index\n", ColorBold, ColorReset, cbJaccard)
-	fmt.Printf("  %s• CB Class B Limit   :%s %d accumulated errors\n", ColorBold, ColorReset, cbClassB)
+	fmt.Printf("  %s• CB Tool Error Limit:%s %d accumulated errors\n", ColorBold, ColorReset, cbMaxToolErrors)
 	fmt.Printf("  %s• Velocity Max RPS   :%s %.1f req/s (0 = unlimited)\n", ColorBold, ColorReset, maxRPS)
 	fmt.Printf("  %s• Velocity Max Repeat:%s %d hits in %s\n", ColorBold, ColorReset, maxEndpointRepeats, repeatWindow)
 	fmt.Printf("  %s• Save Conversations :%s %t (dir: %s)\n", ColorBold, ColorReset, saveConv, saveDir)
@@ -130,7 +142,36 @@ func PrintSREIncident(title string, incident SREIncidentSummary) {
 	fmt.Printf("%s│%s • Incident ID   : %s\n", ColorRed, ColorReset, incident.IncidentID)
 	fmt.Printf("%s│%s • Failure Class : %s%s%s\n", ColorRed, ColorReset, ColorYellow, incident.FailureClass, ColorReset)
 	if incident.ToolName != "" {
-		fmt.Printf("%s│%s • Tool Name     : %s\n", ColorRed, ColorReset, incident.ToolName)
+		fmt.Printf("%s│%s • Trigger Tool  : %s%s%s\n", ColorRed, ColorReset, ColorCyan+ColorBold, incident.ToolName, ColorReset)
+	}
+	if incident.ToolArguments != "" {
+		argsSnippet := strings.TrimSpace(incident.ToolArguments)
+		if len(argsSnippet) > 120 {
+			argsSnippet = argsSnippet[:117] + "..."
+		}
+		fmt.Printf("%s│%s • Trigger Args  : %s%s%s\n", ColorRed, ColorReset, ColorWhite, argsSnippet, ColorReset)
+	}
+	if len(incident.ViolatingCalls) > 0 {
+		fmt.Printf("%s│%s • Violating Calls (%d):\n", ColorRed, ColorReset, len(incident.ViolatingCalls))
+		for i, vc := range incident.ViolatingCalls {
+			argsSnippet := strings.TrimSpace(vc.Arguments)
+			if len(argsSnippet) > 90 {
+				argsSnippet = argsSnippet[:87] + "..."
+			}
+			extra := ""
+			if vc.Distance > 0 || vc.Score > 0 {
+				extra = fmt.Sprintf(" [SimHash Dist: %d, Sim: %.2f]", vc.Distance, vc.Score)
+			} else if vc.Error != "" {
+				extra = fmt.Sprintf(" [Error: %s]", vc.Error)
+			}
+			fmt.Printf("%s│%s   %s[%d]%s %s%s%s(args: %s%s%s)%s%s\n",
+				ColorRed, ColorReset,
+				ColorYellow, i+1, ColorReset,
+				ColorCyan, vc.ToolName, ColorYellow+ColorBold,
+				ColorWhite, argsSnippet, ColorYellow+ColorBold,
+				ColorReset, extra,
+			)
+		}
 	}
 	if incident.SimHashHex != "" {
 		fmt.Printf("%s│%s • SimHash (LSH) : %s (Hamming Dist: %d bits)\n", ColorRed, ColorReset, incident.SimHashHex, incident.HammingDistance)
@@ -293,4 +334,125 @@ func PrintNonStreamingResponse(path, model, content string, toolCalls []PrintToo
 	}
 	fmt.Printf("%s╰── (entropy: %.2f bits/byte) ──────────────────────────────────────────%s\n\n",
 		ColorGreen, entropy, ColorReset)
+}
+
+// formatProgressBar creates an ASCII progress meter for sliding window utilization.
+func formatProgressBar(current, max int, width int) string {
+	if max <= 0 {
+		return ""
+	}
+	pct := float64(current) / float64(max)
+	if pct < 0 {
+		pct = 0
+	}
+	filled := int(pct * float64(width))
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+
+	var color string
+	switch {
+	case pct >= 0.9:
+		color = ColorRed
+	case pct >= 0.7:
+		color = ColorYellow
+	default:
+		color = ColorGreen
+	}
+
+	return fmt.Sprintf(" %s[%s]%s %s%.0f%%%s", color, bar, ColorReset, ColorBold, pct*100, ColorReset)
+}
+
+// SlidingWindowDisplayInfo encapsulates metrics for the visual Sliding Window terminal dashboard.
+type SlidingWindowDisplayInfo struct {
+	Path           string
+	WindowDuration time.Duration
+	TotalRequests  int
+	MaxRequests    int
+	TotalTokens    int
+	MaxTokens      int
+	ModelCounts    map[string]int
+	EnforceLimits  bool
+	LimitExceeded  bool
+	LimitReason    string
+	Entropy        float64
+	LastToolName   string
+	LastToolArgs   string
+}
+
+// PrintSlidingWindowStatus displays a structured, visual terminal dashboard of the current sliding window state,
+// including real-time stream Shannon entropy and the active/last executed tool call with its running parameters.
+func PrintSlidingWindowStatus(info SlidingWindowDisplayInfo) {
+	fmt.Printf("\n%s%s╭── 📊 SLIDING WINDOW STATUS [%s | %s Window] ────────%s\n",
+		ColorCyan, ColorBold, info.Path, info.WindowDuration, ColorReset)
+
+	// Requests Meter
+	if info.MaxRequests > 0 {
+		reqBar := formatProgressBar(info.TotalRequests, info.MaxRequests, 16)
+		fmt.Printf("%s│%s • Total Requests : %s%d%s / %d%s\n", ColorCyan, ColorReset, ColorBold, info.TotalRequests, ColorReset, info.MaxRequests, reqBar)
+	} else {
+		fmt.Printf("%s│%s • Total Requests : %s%d%s (unlimited)\n", ColorCyan, ColorReset, ColorBold, info.TotalRequests, ColorReset)
+	}
+
+	// Tokens Meter
+	if info.MaxTokens > 0 {
+		tokBar := formatProgressBar(info.TotalTokens, info.MaxTokens, 16)
+		fmt.Printf("%s│%s • Total Tokens   : ~%s%d%s / %d%s\n", ColorCyan, ColorReset, ColorBold, info.TotalTokens, ColorReset, info.MaxTokens, tokBar)
+	} else {
+		fmt.Printf("%s│%s • Total Tokens   : ~%s%d%s tokens (unlimited)\n", ColorCyan, ColorReset, ColorBold, info.TotalTokens, ColorReset)
+	}
+
+	// Model Breakdown
+	if len(info.ModelCounts) > 0 {
+		var models []string
+		for m, count := range info.ModelCounts {
+			models = append(models, fmt.Sprintf("%s (%d)", m, count))
+		}
+		sort.Strings(models)
+		fmt.Printf("%s│%s • Model Breakdown: %s\n", ColorCyan, ColorReset, strings.Join(models, ", "))
+	}
+
+	// Stream Shannon Entropy
+	if info.Entropy > 0 {
+		var entropyQuality string
+		switch {
+		case info.Entropy < 2.0:
+			entropyQuality = fmt.Sprintf("%s[Low Diversity / Degeneration Risk]%s", ColorRed, ColorReset)
+		case info.Entropy < 3.5:
+			entropyQuality = fmt.Sprintf("%s[Moderate Diversity]%s", ColorYellow, ColorReset)
+		default:
+			entropyQuality = fmt.Sprintf("%s[Optimal / High Diversity]%s", ColorGreen, ColorReset)
+		}
+		fmt.Printf("%s│%s • Stream Entropy : %s%.2f bits/byte%s %s\n", ColorCyan, ColorReset, ColorBold, info.Entropy, ColorReset, entropyQuality)
+	}
+
+	// Last / Active Tool Call & Parameters
+	if info.LastToolName != "" {
+		argsSnippet := strings.TrimSpace(info.LastToolArgs)
+		if len(argsSnippet) > 90 {
+			argsSnippet = argsSnippet[:87] + "..."
+		}
+		if argsSnippet == "" {
+			argsSnippet = "{}"
+		}
+		fmt.Printf("%s│%s • Active Tool    : %s🛠️  %s%s%s(args: %s%s%s)%s\n",
+			ColorCyan, ColorReset,
+			ColorYellow+ColorBold,
+			ColorCyan, info.LastToolName, ColorYellow+ColorBold,
+			ColorWhite, argsSnippet, ColorYellow+ColorBold,
+			ColorReset,
+		)
+	}
+
+	// Limit Enforcement Status
+	if info.LimitExceeded {
+		fmt.Printf("%s│%s • Limit Status   : %s%sBREACHED (%s)%s\n", ColorCyan, ColorReset, ColorRed, ColorBold, info.LimitReason, ColorReset)
+	} else if info.EnforceLimits {
+		fmt.Printf("%s│%s • Limit Status   : %sOK (Enforcing Active)%s\n", ColorCyan, ColorReset, ColorGreen, ColorReset)
+	} else {
+		fmt.Printf("%s│%s • Limit Status   : %sOK (Monitoring Only)%s\n", ColorCyan, ColorReset, ColorDim, ColorReset)
+	}
+
+	fmt.Printf("%s╰────────────────────────────────────────────────────────────────────────%s\n\n", ColorCyan, ColorReset)
 }

@@ -40,8 +40,8 @@ func main() {
 	// Initialize Circuit Breaker Engine with SimHash and Jaccard
 	cbEngine := inspector.NewCircuitBreakerEngine(inspector.CircuitBreakerConfig{
 		WindowDuration:     cfg.WindowDuration,
-		ClassAMaxIdentical: cfg.CBClassALimit,
-		ClassBMaxErrors:    cfg.CBClassBLimit,
+		MaxToolRepeats:     cfg.CBMaxToolRepeats,
+		MaxToolErrors:      cfg.CBMaxToolErrors,
 		MaxHammingDistance: cfg.CBMaxHammingDist,
 		JaccardThreshold:   cfg.CBJaccardThreshold,
 		Enabled:            cfg.CBEnabled,
@@ -62,6 +62,7 @@ func main() {
 		Inspector:         windowInspector,
 		CircuitBreaker:    cbEngine,
 		Velocity:          velocityDetector,
+		ShowSlidingWindow: cfg.ShowSlidingWindow,
 		SaveConversations: cfg.SaveConversations,
 		SaveDir:           cfg.SaveDir,
 	})
@@ -81,7 +82,7 @@ func main() {
 	utils.PrintStartupBanner(
 		cfg.Port, cfg.TargetURLString,
 		cfg.WindowDuration, cfg.MaxRequests, cfg.MaxTokens, cfg.EnforceLimits,
-		cfg.CBClassALimit, cfg.CBClassBLimit, cfg.CBMaxHammingDist, cfg.CBJaccardThreshold,
+		cfg.CBMaxToolRepeats, cfg.CBMaxToolErrors, cfg.CBMaxHammingDist, cfg.CBJaccardThreshold,
 		cfg.VelocityMaxRPS, cfg.VelocityMaxEndpointRepeats, cfg.VelocityRepeatWindow,
 		cfg.SaveConversations, cfg.SaveDir,
 	)

@@ -194,3 +194,24 @@ func PrintConversation(req *OpenAIRequest, path string) {
 
 	utils.PrintConversation(path, req.Model, hiddenCount, printMsgs)
 }
+
+// GetLatestToolCall extracts the most recent tool call and its parameters from either the response or request messages.
+func GetLatestToolCall(req *OpenAIRequest, resp *RecordedResponse) (string, string) {
+	if resp != nil && len(resp.ToolCalls) > 0 {
+		last := resp.ToolCalls[len(resp.ToolCalls)-1]
+		return last.Function.Name, last.Function.Arguments
+	}
+	if req != nil && len(req.Messages) > 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			msg := req.Messages[i]
+			if len(msg.ToolCalls) > 0 {
+				last := msg.ToolCalls[len(msg.ToolCalls)-1]
+				return last.Function.Name, last.Function.Arguments
+			}
+			if msg.FunctionCall != nil && msg.FunctionCall.Name != "" {
+				return msg.FunctionCall.Name, msg.FunctionCall.Arguments
+			}
+		}
+	}
+	return "", ""
+}

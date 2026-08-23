@@ -22,10 +22,11 @@ type contextKey string
 const reqInfoKey contextKey = "proxy_req_info"
 
 type requestInfo struct {
-	openAIReq *inspector.OpenAIRequest
-	startTime time.Time
-	clientIP  string
-	path      string
+	openAIReq   *inspector.OpenAIRequest
+	startTime   time.Time
+	clientIP    string
+	path        string
+	windowStats inspector.WindowStats
 }
 
 // Config defines the configuration settings for the proxy server.
@@ -35,6 +36,7 @@ type Config struct {
 	Inspector         *inspector.SlidingWindow
 	CircuitBreaker    *inspector.CircuitBreakerEngine
 	Velocity          *inspector.VelocityDetector
+	ShowSlidingWindow bool
 	SaveConversations bool
 	SaveDir           string
 }
@@ -77,8 +79,8 @@ func getSessionKey(r *http.Request) string {
 }
 
 // NewServerHandler creates an HTTP handler that inspects OpenAI JSON payloads,
-// detects Class A / Class B repetition loops via SimHash LSH, enforces session velocity rules,
-// prints conversation history, logs streams, and proxies requests to the target destination.
+// detects tool repetition loops via SimHash LSH, enforces session velocity rules,
+// prints conversation history or sliding window status, logs streams, and proxies requests to the target destination.
 func NewServerHandler(cfg Config) http.Handler {
 	logger := cfg.Logger
 	if logger == nil {
@@ -101,8 +103,8 @@ func NewServerHandler(cfg Config) http.Handler {
 	if cbEngine == nil {
 		cbEngine = inspector.NewCircuitBreakerEngine(inspector.CircuitBreakerConfig{
 			WindowDuration:     60 * time.Second,
-			ClassAMaxIdentical: 3,
-			ClassBMaxErrors:    4,
+			MaxToolRepeats:     3,
+			MaxToolErrors:      4,
 			MaxHammingDistance: 3,
 			JaccardThreshold:   0.85,
 			Enabled:            true,
@@ -146,10 +148,11 @@ func NewServerHandler(cfg Config) http.Handler {
 					reqPath,
 				)
 				reader.SetCircuitBreaker(cbEngine)
+				reader.SetShowSlidingWindow(cfg.ShowSlidingWindow)
 
-				// Register callback to save structured conversation JSON record
-				if cfg.SaveConversations && info != nil && info.openAIReq != nil {
-					reader.SetOnCompleteCallback(func(recorded inspector.RecordedResponse) {
+				// Register callback for conversation saving and sliding window display
+				reader.SetOnCompleteCallback(func(recorded inspector.RecordedResponse) {
+					if cfg.SaveConversations && info != nil && info.openAIReq != nil {
 						record := &inspector.ConversationRecord{
 							Timestamp:  info.startTime,
 							Path:       info.path,
@@ -165,8 +168,28 @@ func NewServerHandler(cfg Config) http.Handler {
 						} else {
 							utils.PrintSavedJSON(savedPath)
 						}
-					})
-				}
+					}
+
+					if cfg.ShowSlidingWindow && info != nil {
+						swCfg := windowInspector.Config()
+						toolName, toolArgs := inspector.GetLatestToolCall(info.openAIReq, &recorded)
+						utils.PrintSlidingWindowStatus(utils.SlidingWindowDisplayInfo{
+							Path:           info.path,
+							WindowDuration: info.windowStats.WindowDuration,
+							TotalRequests:  info.windowStats.TotalRequests,
+							MaxRequests:    swCfg.MaxRequests,
+							TotalTokens:    info.windowStats.TotalTokens,
+							MaxTokens:      swCfg.MaxTokens,
+							ModelCounts:    info.windowStats.ModelCounts,
+							EnforceLimits:  swCfg.EnforceLimits,
+							LimitExceeded:  info.windowStats.LimitExceeded,
+							LimitReason:    info.windowStats.LimitReason,
+							Entropy:        recorded.Entropy,
+							LastToolName:   toolName,
+							LastToolArgs:   toolArgs,
+						})
+					}
+				})
 
 				resp.Body = reader
 			}
@@ -230,13 +253,26 @@ func NewServerHandler(cfg Config) http.Handler {
 			}
 		}
 
-		// 2. Check Circuit Breaker for Class A (SimHash/Jaccard loops) or Class B (error accumulation) in request history
+		// 2. Check Circuit Breaker for tool repetition loops or error accumulation in request history
 		if openAIReq != nil && len(openAIReq.Messages) > 0 {
 			if incident, tripped := cbEngine.CheckRequestHistory(openAIReq.Messages); tripped {
+				var violatingCalls []utils.SREViolatingCall
+				for _, vc := range incident.ViolatingCalls {
+					violatingCalls = append(violatingCalls, utils.SREViolatingCall{
+						ToolName:  vc.ToolName,
+						Arguments: vc.Arguments,
+						Error:     vc.Error,
+						Distance:  vc.HammingDistance,
+						Score:     vc.SimilarityScore,
+					})
+				}
+
 				utils.PrintSREIncident("CIRCUIT BREAKER OPEN (REQUEST REJECTED)", utils.SREIncidentSummary{
 					IncidentID:      incident.IncidentID,
 					FailureClass:    incident.FailureClass,
 					ToolName:        incident.ToolName,
+					ToolArguments:   incident.ToolArguments,
+					ViolatingCalls:  violatingCalls,
 					Fingerprint:     incident.Fingerprint,
 					SimHashHex:      incident.SimHashHex,
 					HammingDistance: incident.HammingDistance,
@@ -255,23 +291,44 @@ func NewServerHandler(cfg Config) http.Handler {
 			}
 		}
 
-		// Pretty-print full conversation history if present
-		if openAIReq != nil && len(openAIReq.Messages) > 0 {
+		// 3. Record Sliding Window Metrics and evaluate limits
+		stats, allowed := windowInspector.Record(openAIReq, r.RemoteAddr)
+
+		// 4. If not showing sliding window dashboard, display incoming conversation turn
+		if !cfg.ShowSlidingWindow && openAIReq != nil && len(openAIReq.Messages) > 0 {
 			inspector.PrintConversation(openAIReq, r.URL.Path)
 		}
 
 		// Store request info in context for response recorder
 		info := &requestInfo{
-			openAIReq: openAIReq,
-			startTime: start,
-			clientIP:  r.RemoteAddr,
-			path:      r.URL.Path,
+			openAIReq:   openAIReq,
+			startTime:   start,
+			clientIP:    r.RemoteAddr,
+			path:        r.URL.Path,
+			windowStats: stats,
 		}
 		r = r.WithContext(context.WithValue(r.Context(), reqInfoKey, info))
 
-		stats, allowed := windowInspector.Record(openAIReq, r.RemoteAddr)
-
 		if !allowed {
+			if cfg.ShowSlidingWindow {
+				swCfg := windowInspector.Config()
+				toolName, toolArgs := inspector.GetLatestToolCall(openAIReq, nil)
+				utils.PrintSlidingWindowStatus(utils.SlidingWindowDisplayInfo{
+					Path:           r.URL.Path,
+					WindowDuration: stats.WindowDuration,
+					TotalRequests:  stats.TotalRequests,
+					MaxRequests:    swCfg.MaxRequests,
+					TotalTokens:    stats.TotalTokens,
+					MaxTokens:      swCfg.MaxTokens,
+					ModelCounts:    stats.ModelCounts,
+					EnforceLimits:  swCfg.EnforceLimits,
+					LimitExceeded:  stats.LimitExceeded,
+					LimitReason:    stats.LimitReason,
+					Entropy:        0,
+					LastToolName:   toolName,
+					LastToolArgs:   toolArgs,
+				})
+			}
 			utils.PrintBlockedSummary(r.Method, r.URL.RequestURI(), stats.LimitReason)
 
 			w.Header().Set("Content-Type", "application/json")

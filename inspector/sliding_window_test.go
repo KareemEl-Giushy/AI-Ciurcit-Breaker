@@ -150,3 +150,36 @@ func TestSlidingWindow_Concurrency(t *testing.T) {
 		t.Errorf("expected %d requests, got %d", expectedRequests, stats.TotalRequests)
 	}
 }
+
+func TestGetLatestToolCall(t *testing.T) {
+	// From response
+	resp := &RecordedResponse{
+		ToolCalls: []ToolCall{
+			{Function: FunctionCall{Name: "search_db", Arguments: `{"query":"users"}`}},
+		},
+	}
+	tool, args := GetLatestToolCall(nil, resp)
+	if tool != "search_db" || args != `{"query":"users"}` {
+		t.Errorf("expected search_db / users, got %s / %s", tool, args)
+	}
+
+	// From request messages
+	req := &OpenAIRequest{
+		Messages: []ChatMessage{
+			{Role: "user", Content: "Run tool"},
+			{Role: "assistant", ToolCalls: []ToolCall{
+				{Function: FunctionCall{Name: "execute_code", Arguments: `{"code":"print(1)"}`}},
+			}},
+		},
+	}
+	tool2, args2 := GetLatestToolCall(req, nil)
+	if tool2 != "execute_code" || args2 != `{"code":"print(1)"}` {
+		t.Errorf("expected execute_code / print(1), got %s / %s", tool2, args2)
+	}
+
+	// Empty
+	tool3, args3 := GetLatestToolCall(nil, nil)
+	if tool3 != "" || args3 != "" {
+		t.Errorf("expected empty tool call, got %s / %s", tool3, args3)
+	}
+}

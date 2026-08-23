@@ -179,6 +179,13 @@ func (sw *SlidingWindow) GetStats() WindowStats {
 	return stats
 }
 
+// Config returns the current sliding window configuration.
+func (sw *SlidingWindow) Config() SlidingWindowConfig {
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
+	return sw.config
+}
+
 // Reset clears all entries from the sliding window.
 func (sw *SlidingWindow) Reset() {
 	sw.mu.Lock()

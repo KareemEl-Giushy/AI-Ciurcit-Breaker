@@ -156,7 +156,7 @@ func TestProxyForwardsOpenAIJSONRequestWithConversation(t *testing.T) {
 	}
 }
 
-func TestProxyCircuitBreaker_ClassA_Rejection(t *testing.T) {
+func TestProxyCircuitBreaker_ToolLoop_Rejection(t *testing.T) {
 	backendCalled := false
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendCalled = true
@@ -166,8 +166,8 @@ func TestProxyCircuitBreaker_ClassA_Rejection(t *testing.T) {
 
 	backendURL, _ := url.Parse(backend.URL)
 	cbEngine := inspector.NewCircuitBreakerEngine(inspector.CircuitBreakerConfig{
-		ClassAMaxIdentical: 3,
-		Enabled:            true,
+		MaxToolRepeats: 3,
+		Enabled:        true,
 	})
 
 	handler := NewServerHandler(Config{
@@ -211,8 +211,8 @@ func TestProxyCircuitBreaker_ClassA_Rejection(t *testing.T) {
 		t.Fatalf("failed to unmarshal SRE JSON error response: %v", err)
 	}
 
-	if sreResp.SREIncident.FailureClass != inspector.ClassAIdenticalLoop {
-		t.Errorf("expected failure class %s, got %s", inspector.ClassAIdenticalLoop, sreResp.SREIncident.FailureClass)
+	if sreResp.SREIncident.FailureClass != inspector.FailureClassToolLoop {
+		t.Errorf("expected failure class %s, got %s", inspector.FailureClassToolLoop, sreResp.SREIncident.FailureClass)
 	}
 	if sreResp.SREIncident.CircuitState != "OPEN_TRIPPED" {
 		t.Errorf("expected circuit state 'OPEN_TRIPPED', got '%s'", sreResp.SREIncident.CircuitState)
@@ -501,5 +501,76 @@ func TestProxyBackendUnreachableReturns502(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected status %d (Bad Gateway), got %d", http.StatusBadGateway, resp.StatusCode)
+	}
+}
+
+func TestProxyShowSlidingWindowMode(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-123","model":"gpt-4","choices":[{"message":{"role":"assistant","content":"Sliding window mode active."}}]}`))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+	handler := NewServerHandler(Config{
+		TargetURL:         backendURL,
+		ShowSlidingWindow: true,
+	})
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	payload := `{"model":"gpt-4","messages":[{"role":"user","content":"Status check"}]}`
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json", bytes.NewBufferString(payload))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestProxyShowSlidingWindowMode_WithToolCallsAndEntropy(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-456",
+			"model":"gpt-4",
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":"Fetching your data...",
+					"tool_calls":[{
+						"id":"call_search123",
+						"type":"function",
+						"function":{"name":"query_database","arguments":"{\"table\":\"users\",\"limit\":10}"}
+					}]
+				}
+			}]
+		}`))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+	handler := NewServerHandler(Config{
+		TargetURL:         backendURL,
+		ShowSlidingWindow: true,
+	})
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	payload := `{"model":"gpt-4","messages":[{"role":"user","content":"Get 10 users"}]}`
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json", bytes.NewBufferString(payload))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
 }

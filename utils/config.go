@@ -25,11 +25,12 @@ type YAMLConfig struct {
 		MaxRequests    *int   `yaml:"max_requests"`
 		MaxTokens      *int   `yaml:"max_tokens"`
 		EnforceLimits  *bool  `yaml:"enforce_limits"`
+		ShowInTerminal *bool  `yaml:"show_in_terminal"`
 	} `yaml:"sliding_window"`
 	CircuitBreaker struct {
 		Enabled            *bool    `yaml:"enabled"`
-		ClassALimit        *int     `yaml:"class_a_limit"`
-		ClassBLimit        *int     `yaml:"class_b_limit"`
+		MaxToolRepeats     *int     `yaml:"max_tool_repeats"`
+		MaxToolErrors      *int     `yaml:"max_tool_errors"`
 		MaxHammingDistance *int     `yaml:"max_hamming_distance"`
 		JaccardThreshold   *float64 `yaml:"jaccard_threshold"`
 	} `yaml:"circuit_breaker"`
@@ -55,15 +56,16 @@ type AppConfig struct {
 	LogLevelString  string
 
 	// Sliding Window
-	WindowDuration time.Duration
-	MaxRequests    int
-	MaxTokens      int
-	EnforceLimits  bool
+	WindowDuration    time.Duration
+	MaxRequests       int
+	MaxTokens         int
+	EnforceLimits     bool
+	ShowSlidingWindow bool
 
 	// Circuit Breaker
 	CBEnabled          bool
-	CBClassALimit      int
-	CBClassBLimit      int
+	CBMaxToolRepeats   int
+	CBMaxToolErrors    int
 	CBMaxHammingDist   int
 	CBJaccardThreshold float64
 
@@ -137,11 +139,11 @@ func (cfg *AppConfig) Validate() error {
 		return fmt.Errorf("window max tokens cannot be negative, got %d", cfg.MaxTokens)
 	}
 
-	if cfg.CBClassALimit <= 0 {
-		return fmt.Errorf("circuit breaker class A limit must be >= 1, got %d", cfg.CBClassALimit)
+	if cfg.CBMaxToolRepeats <= 0 {
+		return fmt.Errorf("circuit breaker tool repetition limit must be >= 1, got %d", cfg.CBMaxToolRepeats)
 	}
-	if cfg.CBClassBLimit <= 0 {
-		return fmt.Errorf("circuit breaker class B limit must be >= 1, got %d", cfg.CBClassBLimit)
+	if cfg.CBMaxToolErrors <= 0 {
+		return fmt.Errorf("circuit breaker tool error limit must be >= 1, got %d", cfg.CBMaxToolErrors)
 	}
 	if cfg.CBMaxHammingDist < 0 || cfg.CBMaxHammingDist > 64 {
 		return fmt.Errorf("circuit breaker max Hamming distance must be between 0 and 64, got %d", cfg.CBMaxHammingDist)
@@ -239,6 +241,12 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 	}
 	defaultEnforceLimits = GetEnvBool("ENFORCE_LIMITS", defaultEnforceLimits)
 
+	defaultShowSlidingWindow := false
+	if yamlCfg != nil && yamlCfg.SlidingWindow.ShowInTerminal != nil {
+		defaultShowSlidingWindow = *yamlCfg.SlidingWindow.ShowInTerminal
+	}
+	defaultShowSlidingWindow = GetEnvBool("SHOW_SLIDING_WINDOW", defaultShowSlidingWindow)
+
 	// 3. Resolve Circuit Breaker Defaults
 	defaultCBEnabled := true
 	if yamlCfg != nil && yamlCfg.CircuitBreaker.Enabled != nil {
@@ -246,17 +254,17 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 	}
 	defaultCBEnabled = GetEnvBool("CB_ENABLED", defaultCBEnabled)
 
-	defaultCBClassA := 3
-	if yamlCfg != nil && yamlCfg.CircuitBreaker.ClassALimit != nil {
-		defaultCBClassA = *yamlCfg.CircuitBreaker.ClassALimit
+	defaultCBMaxToolRepeats := 3
+	if yamlCfg != nil && yamlCfg.CircuitBreaker.MaxToolRepeats != nil {
+		defaultCBMaxToolRepeats = *yamlCfg.CircuitBreaker.MaxToolRepeats
 	}
-	defaultCBClassA = GetEnvInt("CB_CLASS_A_LIMIT", defaultCBClassA)
+	defaultCBMaxToolRepeats = GetEnvInt("CB_MAX_TOOL_REPEATS", defaultCBMaxToolRepeats)
 
-	defaultCBClassB := 4
-	if yamlCfg != nil && yamlCfg.CircuitBreaker.ClassBLimit != nil {
-		defaultCBClassB = *yamlCfg.CircuitBreaker.ClassBLimit
+	defaultCBMaxToolErrors := 4
+	if yamlCfg != nil && yamlCfg.CircuitBreaker.MaxToolErrors != nil {
+		defaultCBMaxToolErrors = *yamlCfg.CircuitBreaker.MaxToolErrors
 	}
-	defaultCBClassB = GetEnvInt("CB_CLASS_B_LIMIT", defaultCBClassB)
+	defaultCBMaxToolErrors = GetEnvInt("CB_MAX_TOOL_ERRORS", defaultCBMaxToolErrors)
 
 	defaultCBHamming := 3
 	if yamlCfg != nil && yamlCfg.CircuitBreaker.MaxHammingDistance != nil {
@@ -320,9 +328,10 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 	maxRequestsFlag := fs.Int("window-max-requests", defaultMaxRequests, "Max requests allowed in sliding window (0 for unlimited)")
 	maxTokensFlag := fs.Int("window-max-tokens", defaultMaxTokens, "Max estimated tokens in sliding window (0 for unlimited)")
 	enforceLimitsFlag := fs.Bool("enforce-limits", defaultEnforceLimits, "Enforce sliding window limits (rejects with 429 when breached)")
+	showSlidingWindowFlag := fs.Bool("show-sliding-window", defaultShowSlidingWindow, "Show sliding window status in terminal instead of conversation turns and tool calls (or env SHOW_SLIDING_WINDOW)")
 	cbEnabledFlag := fs.Bool("cb-enabled", defaultCBEnabled, "Enable tool-call circuit breaker protection")
-	cbClassAFlag := fs.Int("cb-class-a-limit", defaultCBClassA, "Max identical/similar tool calls allowed before tripping Class A circuit breaker")
-	cbClassBFlag := fs.Int("cb-class-b-limit", defaultCBClassB, "Max accumulated tool errors before tripping Class B circuit breaker")
+	cbMaxToolRepeatsFlag := fs.Int("cb-max-tool-repeats", defaultCBMaxToolRepeats, "Max identical/similar tool calls allowed before tripping tool loop circuit breaker")
+	cbMaxToolErrorsFlag := fs.Int("cb-max-tool-errors", defaultCBMaxToolErrors, "Max accumulated tool errors before tripping error accumulation circuit breaker")
 	cbHammingFlag := fs.Int("cb-max-hamming-dist", defaultCBHamming, "Max SimHash Hamming distance to treat tool calls as identical/near-duplicate (0-64 bits)")
 	cbJaccardFlag := fs.Float64("cb-jaccard-threshold", defaultCBJaccard, "Jaccard similarity threshold for detecting near-duplicate tool calls (0.0 to 1.0)")
 	velocityEnabledFlag := fs.Bool("velocity-enabled", defaultVelocityEnabled, "Enable session velocity detection")
@@ -365,9 +374,10 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 		MaxRequests:                *maxRequestsFlag,
 		MaxTokens:                  *maxTokensFlag,
 		EnforceLimits:              *enforceLimitsFlag,
+		ShowSlidingWindow:          *showSlidingWindowFlag,
 		CBEnabled:                  *cbEnabledFlag,
-		CBClassALimit:              *cbClassAFlag,
-		CBClassBLimit:              *cbClassBFlag,
+		CBMaxToolRepeats:           *cbMaxToolRepeatsFlag,
+		CBMaxToolErrors:            *cbMaxToolErrorsFlag,
 		CBMaxHammingDist:           *cbHammingFlag,
 		CBJaccardThreshold:         *cbJaccardFlag,
 		VelocityEnabled:            *velocityEnabledFlag,

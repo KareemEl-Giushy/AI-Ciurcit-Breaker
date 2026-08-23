@@ -74,6 +74,14 @@ sliding_window:
   # Default  : false
   enforce_limits: false
 
+  # When set to true, replaces multi-turn conversation and live tool-call
+  # streaming in the terminal with a visual Sliding Window Dashboard containing
+  # real-time stream Shannon entropy and the active tool call with its parameters.
+  # CLI Flag : -show-sliding-window
+  # Env Var  : SHOW_SLIDING_WINDOW
+  # Default  : false
+  show_in_terminal: false
+
 
 # ------------------------------------------------------------------------------
 # 3. CIRCUIT BREAKER (Tool Looping & Error Accumulation Engine)
@@ -87,22 +95,22 @@ circuit_breaker:
   # Default  : true
   enabled: true
 
-  # Class A Repetition Limit:
+  # Maximum Tool Call Repetition Limit:
   # Maximum allowed identical or near-duplicate tool calls in the active window.
   # Once reached, the breaker trips (OPEN_TRIPPED), terminates live SSE streams,
   # and rejects incoming requests at the edge with HTTP 429 and structured SRE JSON.
-  # CLI Flag : -cb-class-a-limit
-  # Env Var  : CB_CLASS_A_LIMIT
+  # CLI Flag : -cb-max-tool-repeats
+  # Env Var  : CB_MAX_TOOL_REPEATS
   # Default  : 3
-  class_a_limit: 3
+  max_tool_repeats: 3
 
-  # Class B Error Accumulation Limit:
+  # Maximum Tool Error Accumulation Limit:
   # Maximum allowed tool execution errors (e.g. timeouts, permission denied,
   # exception traces) in the active window before tripping the breaker.
-  # CLI Flag : -cb-class-b-limit
-  # Env Var  : CB_CLASS_B_LIMIT
+  # CLI Flag : -cb-max-tool-errors
+  # Env Var  : CB_MAX_TOOL_ERRORS
   # Default  : 4
-  class_b_limit: 4
+  max_tool_errors: 4
 
   # SimHash Maximum Hamming Distance (Locality-Sensitive Hashing):
   # Modern LLMs mutate prompts slightly during loops (e.g. "(attempt 0)" vs "(attempt 1)").

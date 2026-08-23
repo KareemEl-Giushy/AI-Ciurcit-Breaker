@@ -38,9 +38,9 @@ By the end of this guide, you will:
 Imagine you are building an AI Agent application. Your agent talks to an LLM provider (like OpenAI or a local model) to perform actions using **tools** (e.g. database queries, weather searches, bash commands).
 
 Modern LLMs frequently suffer from dangerous runtime failure modes:
-1. **Tool-Call Hallucination Loops (Class A)**:
+1. **Tool-Call Repetition Loops**:
    The model gets stuck calling the exact same tool or slightly mutated versions of it (e.g. `(attempt 0)` vs `(attempt 1)`).
-2. **Error Accumulation Loops (Class B)**:
+2. **Tool Error Accumulation**:
    A tool returns an error, and the agent blindly retries in a storm without resolving the root cause.
 3. **Anomalous Request Velocity**:
    A runaway agent issues hundreds of requests per second, hammering specific endpoints or exceeding downstream rate limits.
@@ -109,7 +109,7 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
    │
 5. [inspector/openai.go] Parses JSON into structured OpenAIRequest
    │
-6. [inspector/circuit_breaker.go] Checks conversation history for SimHash/Jaccard loops (Class A) or errors (Class B)
+6. [inspector/circuit_breaker.go] Checks conversation history for tool repetition loops or error accumulation
    ├─► IF TRIPPED: Returns HTTP 429 + Structured SRE Incident JSON error response
    └─► IF OK: Continues
    │
@@ -117,7 +117,7 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
    ├─► IF LIMIT ENFORCEMENT ON & EXCEEDED: Returns HTTP 429
    └─► IF OK: Continues
    │
-8. [inspector/openai.go] Pretty-prints latest interaction turn to terminal
+8. [inspector/openai.go] Pretty-prints latest interaction turn to terminal (or sliding window dashboard)
    │
 9. [proxy/proxy.go] Forwards request to Target LLM Server
    │
@@ -168,8 +168,9 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
 1. **Velocity Gatekeeper**: Checks `velocityDetector.RecordRequest(sessionKey, path)` before processing bodies.
 2. **Request Interception**: Reads `r.Body`, unmarshals OpenAI JSON, and replaces `r.Body` with `io.NopCloser`.
 3. **Edge Loop Rejection**: Runs `cbEngine.CheckRequestHistory(messages)` to reject looping prompts before reaching LLM backends.
-4. **Response Hook (`ModifyResponse`)**: Attaches `inspector.NewRealtimeResponseReader` to `resp.Body` for live stream analysis.
-5. **Immediate SSE Flushing**: Uses `FlushInterval = -1` for real-time token streaming.
+4. **Visual Switcher**: Renders either conversation turns or the **Sliding Window dashboard** when `show_sliding_window` is enabled.
+5. **Response Hook (`ModifyResponse`)**: Attaches `inspector.NewRealtimeResponseReader` to `resp.Body` for live stream analysis.
+6. **Immediate SSE Flushing**: Uses `FlushInterval = -1` for real-time token streaming.
 
 ---
 
@@ -189,8 +190,8 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
 
 #### What it does:
 Maintains thread-safe rolling history of tool calls:
-- **Class A Loop (`CLASS_A_IDENTICAL_TOOL_CALL_LOOP`)**: Trips when identical or SimHash near-duplicate tool calls ($D_H \le 3$) reach `ClassAMaxIdentical` (default: 3).
-- **Class B Errors (`CLASS_B_ERROR_ACCUMULATION`)**: Trips when accumulated tool failures reach `ClassBMaxErrors` (default: 4).
+- **Tool Repetition Loop (`TOOL_CALL_REPETITION_LOOP`)**: Trips when identical or SimHash near-duplicate tool calls ($D_H \le 3$) reach `MaxToolRepeats` (default: 3).
+- **Tool Error Accumulation (`TOOL_ERROR_ACCUMULATION`)**: Trips when accumulated tool failures reach `MaxToolErrors` (default: 4).
 - **Structured SRE Incident**: Emits structured JSON with `IncidentID`, `FailureClass`, `SimHashHex`, `HammingDistance`, `Mitigation`, and `ActionRequired`.
 
 ---
@@ -251,7 +252,7 @@ Saves structured JSON conversation audit logs to `./conversations/conv_<timestam
 - **`colors.go`**: ANSI styling codes.
 - **`env.go`**: Safe environment variable parsers.
 - **`config.go`**: YAML loader and configuration validator.
-- **`printer.go`**: Centralized terminal formatting, banners, access logs, stream typing, and SRE alert boxes.
+- **`printer.go`**: Centralized terminal formatting, banners, access logs, stream typing, sliding window dashboard, and SRE alert boxes.
 
 ---
 
@@ -270,11 +271,12 @@ sliding_window:
   max_requests: 0
   max_tokens: 0
   enforce_limits: false
+  show_in_terminal: false
 
 circuit_breaker:
   enabled: true
-  class_a_limit: 3
-  class_b_limit: 4
+  max_tool_repeats: 3
+  max_tool_errors: 4
   max_hamming_distance: 3
   jaccard_threshold: 0.85
 
@@ -327,7 +329,7 @@ if r.Header.Get("Authorization") == "" {
 ./start.sh
 
 # Start server with custom flags
-./proxy-server -port 8080 -target http://localhost:3000 -cb-class-a-limit 3
+./proxy-server -port 8080 -target http://localhost:3000 -cb-max-tool-repeats 3 -cb-max-tool-errors 4
 
 # Run all unit and integration tests
 go test -v ./...

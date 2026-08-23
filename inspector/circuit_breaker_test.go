@@ -88,11 +88,11 @@ func TestJaccardSimilarity(t *testing.T) {
 	}
 }
 
-func TestCircuitBreaker_ClassA_IdenticalToolCall(t *testing.T) {
+func TestCircuitBreaker_ToolLoop_IdenticalToolCall(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
-		WindowDuration:     1 * time.Minute,
-		ClassAMaxIdentical: 3,
-		Enabled:            true,
+		WindowDuration: 1 * time.Minute,
+		MaxToolRepeats: 3,
+		Enabled:        true,
 	})
 
 	tool := "search_db"
@@ -110,24 +110,30 @@ func TestCircuitBreaker_ClassA_IdenticalToolCall(t *testing.T) {
 		t.Fatalf("expected call 2 not to trip circuit breaker")
 	}
 
-	// 3rd call -> should trip Class A!
+	// 3rd call -> should trip Tool Repetition Loop!
 	incident, tripped = cb.RecordToolCall(tool, args, false, "")
 	if !tripped || incident == nil {
-		t.Fatalf("expected call 3 to trip Class A circuit breaker")
+		t.Fatalf("expected call 3 to trip Tool Repetition Loop circuit breaker")
 	}
 
-	if incident.FailureClass != ClassAIdenticalLoop {
-		t.Errorf("expected failure class %s, got %s", ClassAIdenticalLoop, incident.FailureClass)
+	if incident.FailureClass != FailureClassToolLoop {
+		t.Errorf("expected failure class %s, got %s", FailureClassToolLoop, incident.FailureClass)
 	}
 	if incident.ObservedCount != 3 {
 		t.Errorf("expected observed count 3, got %d", incident.ObservedCount)
 	}
+	if incident.ToolName != tool || incident.ToolArguments != args {
+		t.Errorf("expected tool/args %s / %s, got %s / %s", tool, args, incident.ToolName, incident.ToolArguments)
+	}
+	if len(incident.ViolatingCalls) != 3 {
+		t.Errorf("expected 3 violating calls recorded, got %d", len(incident.ViolatingCalls))
+	}
 }
 
-func TestCircuitBreaker_ClassA_SimHash_NearDuplicateLoop(t *testing.T) {
+func TestCircuitBreaker_ToolLoop_SimHash_NearDuplicateLoop(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
 		WindowDuration:     1 * time.Minute,
-		ClassAMaxIdentical: 3,
+		MaxToolRepeats:     3,
 		MaxHammingDistance: 3,
 		Enabled:            true,
 	})
@@ -150,14 +156,14 @@ func TestCircuitBreaker_ClassA_SimHash_NearDuplicateLoop(t *testing.T) {
 		t.Fatalf("expected call 2 not to trip")
 	}
 
-	// 3rd call -> should trip Class A via SimHash LSH!
+	// 3rd call -> should trip Tool Loop via SimHash LSH!
 	incident, tripped := cb.RecordToolCall(tool, args3, false, "")
 	if !tripped || incident == nil {
-		t.Fatalf("expected call 3 to trip Class A circuit breaker via SimHash")
+		t.Fatalf("expected call 3 to trip Tool Loop circuit breaker via SimHash")
 	}
 
-	if incident.FailureClass != ClassAIdenticalLoop {
-		t.Errorf("expected %s, got %s", ClassAIdenticalLoop, incident.FailureClass)
+	if incident.FailureClass != FailureClassToolLoop {
+		t.Errorf("expected %s, got %s", FailureClassToolLoop, incident.FailureClass)
 	}
 	if incident.ObservedCount != 3 {
 		t.Errorf("expected observed count 3, got %d", incident.ObservedCount)
@@ -167,12 +173,12 @@ func TestCircuitBreaker_ClassA_SimHash_NearDuplicateLoop(t *testing.T) {
 	}
 }
 
-func TestCircuitBreaker_ClassA_JaccardSimilarity_NearDuplicateLoop(t *testing.T) {
+func TestCircuitBreaker_ToolLoop_JaccardSimilarity_NearDuplicateLoop(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
-		WindowDuration:     1 * time.Minute,
-		ClassAMaxIdentical: 3,
-		JaccardThreshold:   0.80,
-		Enabled:            true,
+		WindowDuration:   1 * time.Minute,
+		MaxToolRepeats:   3,
+		JaccardThreshold: 0.80,
+		Enabled:          true,
 	})
 
 	tool := "search_db"
@@ -192,14 +198,14 @@ func TestCircuitBreaker_ClassA_JaccardSimilarity_NearDuplicateLoop(t *testing.T)
 		t.Fatalf("expected call 2 not to trip")
 	}
 
-	// 3rd call -> should trip Class A on near duplicate repetition!
+	// 3rd call -> should trip Tool Loop on near duplicate repetition!
 	incident, tripped := cb.RecordToolCall(tool, args3, false, "")
 	if !tripped || incident == nil {
-		t.Fatalf("expected call 3 to trip Class A circuit breaker via Jaccard similarity")
+		t.Fatalf("expected call 3 to trip Tool Loop circuit breaker via Jaccard similarity")
 	}
 
-	if incident.FailureClass != ClassAIdenticalLoop {
-		t.Errorf("expected %s, got %s", ClassAIdenticalLoop, incident.FailureClass)
+	if incident.FailureClass != FailureClassToolLoop {
+		t.Errorf("expected %s, got %s", FailureClassToolLoop, incident.FailureClass)
 	}
 	if incident.ObservedCount != 3 {
 		t.Errorf("expected observed count 3, got %d", incident.ObservedCount)
@@ -209,11 +215,11 @@ func TestCircuitBreaker_ClassA_JaccardSimilarity_NearDuplicateLoop(t *testing.T)
 	}
 }
 
-func TestCircuitBreaker_ClassB_ErrorAccumulation(t *testing.T) {
+func TestCircuitBreaker_ToolErrorAccumulation(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
-		WindowDuration:  1 * time.Minute,
-		ClassBMaxErrors: 3,
-		Enabled:         true,
+		WindowDuration: 1 * time.Minute,
+		MaxToolErrors:  3,
+		Enabled:        true,
 	})
 
 	// 1st error
@@ -228,14 +234,14 @@ func TestCircuitBreaker_ClassB_ErrorAccumulation(t *testing.T) {
 		t.Fatalf("expected error 2 not to trip")
 	}
 
-	// 3rd error -> trips Class B!
+	// 3rd error -> trips Tool Error Accumulation!
 	incident, tripped := cb.RecordToolCall("tool3", `{"c":3}`, true, "connection refused")
 	if !tripped || incident == nil {
-		t.Fatalf("expected error 3 to trip Class B circuit breaker")
+		t.Fatalf("expected error 3 to trip Tool Error Accumulation circuit breaker")
 	}
 
-	if incident.FailureClass != ClassBErrorAccumulation {
-		t.Errorf("expected failure class %s, got %s", ClassBErrorAccumulation, incident.FailureClass)
+	if incident.FailureClass != FailureClassErrorAccumulation {
+		t.Errorf("expected failure class %s, got %s", FailureClassErrorAccumulation, incident.FailureClass)
 	}
 	if incident.ObservedCount != 3 {
 		t.Errorf("expected observed count 3, got %d", incident.ObservedCount)
@@ -244,15 +250,15 @@ func TestCircuitBreaker_ClassB_ErrorAccumulation(t *testing.T) {
 
 func TestCircuitBreaker_CheckRequestHistory(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
-		ClassAMaxIdentical: 3,
-		ClassBMaxErrors:    3,
+		MaxToolRepeats:     3,
+		MaxToolErrors:      3,
 		MaxHammingDistance: 4,
 		JaccardThreshold:   0.80,
 		Enabled:            true,
 	})
 
 	// Case 1: 3 near-duplicate tool calls in conversation history (SimHash / Jaccard similarity)
-	messagesWithClassA := []ChatMessage{
+	messagesWithToolLoop := []ChatMessage{
 		{Role: "user", Content: "Run search."},
 		{Role: "assistant", ToolCalls: []ToolCall{{Function: FunctionCall{Name: "search", Arguments: `{"query":"search for all active servers in us-east-1 datacenter"}`}}}},
 		{Role: "tool", Content: `{"result": "none"}`},
@@ -261,27 +267,30 @@ func TestCircuitBreaker_CheckRequestHistory(t *testing.T) {
 		{Role: "assistant", ToolCalls: []ToolCall{{Function: FunctionCall{Name: "search", Arguments: `{"query":"search for all active servers in us-east-3 datacenter"}`}}}},
 	}
 
-	incident, tripped := cb.CheckRequestHistory(messagesWithClassA)
+	incident, tripped := cb.CheckRequestHistory(messagesWithToolLoop)
 	if !tripped || incident == nil {
-		t.Fatalf("expected Class A trip in history check with SimHash/Jaccard similarity")
+		t.Fatalf("expected Tool Loop trip in history check with SimHash/Jaccard similarity")
 	}
-	if incident.FailureClass != ClassAIdenticalLoop {
-		t.Errorf("expected ClassAIdenticalLoop, got %s", incident.FailureClass)
+	if incident.FailureClass != FailureClassToolLoop {
+		t.Errorf("expected FailureClassToolLoop, got %s", incident.FailureClass)
+	}
+	if len(incident.ViolatingCalls) < 3 {
+		t.Errorf("expected at least 3 violating calls in history, got %d", len(incident.ViolatingCalls))
 	}
 
 	// Case 2: 3 error tool responses in conversation history
-	messagesWithClassB := []ChatMessage{
+	messagesWithErrorAccumulation := []ChatMessage{
 		{Role: "user", Content: "Start process."},
 		{Role: "tool", Content: `{"status":"error", "message":"connection timeout"}`},
 		{Role: "tool", Content: `{"error":"permission denied"}`},
 		{Role: "tool", Content: `{"failed": true, "reason":"resource locked"}`},
 	}
 
-	incidentB, trippedB := cb.CheckRequestHistory(messagesWithClassB)
+	incidentB, trippedB := cb.CheckRequestHistory(messagesWithErrorAccumulation)
 	if !trippedB || incidentB == nil {
-		t.Fatalf("expected Class B trip in history check")
+		t.Fatalf("expected Tool Error Accumulation trip in history check")
 	}
-	if incidentB.FailureClass != ClassBErrorAccumulation {
-		t.Errorf("expected ClassBErrorAccumulation, got %s", incidentB.FailureClass)
+	if incidentB.FailureClass != FailureClassErrorAccumulation {
+		t.Errorf("expected FailureClassErrorAccumulation, got %s", incidentB.FailureClass)
 	}
 }

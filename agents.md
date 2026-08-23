@@ -26,8 +26,8 @@ This repository provides an HTTP Reverse Proxy written in Go designed to:
 │   ├── proxy.go                  # Reverse proxy handler, request logging middleware, body buffering, SSE flushing
 │   └── proxy_test.go             # Integration & unit tests for proxy forwarding, SSE streaming, rate limiting
 ├── inspector/
-│   ├── circuit_breaker.go        # CircuitBreakerEngine with Class A/B loop detection and SRE incidents
-│   ├── circuit_breaker_test.go   # Unit tests for fingerprinting, Class A, and Class B detection
+│   ├── circuit_breaker.go        # CircuitBreakerEngine with tool repetition and error accumulation detection
+│   ├── circuit_breaker_test.go   # Unit tests for fingerprinting, SimHash, tool loop, and error accumulation
 │   ├── entropy.go                # Zero-allocation Shannon entropy engine on incoming chunk streams
 │   ├── entropy_test.go           # Unit tests & benchmarks for 0 B/op stream entropy calculation
 │   ├── fingerprint.go            # 64-bit SimHash (LSH) & SHA256 tool fingerprinting and Jaccard similarity
@@ -116,6 +116,9 @@ go vet ./...
 | `-window-duration` | `WINDOW_DURATION` | `60s` | Sliding window rolling time duration |
 | `-window-max-requests` | `WINDOW_MAX_REQUESTS` | `0` | Max requests allowed in sliding window (0 = disabled) |
 | `-window-max-tokens` | `WINDOW_MAX_TOKENS` | `0` | Max estimated tokens allowed in sliding window (0 = disabled) |
+| `-show-sliding-window` | `SHOW_SLIDING_WINDOW` | `false` | Display sliding window terminal dashboard instead of conversation turns |
+| `-cb-max-tool-repeats` | `CB_MAX_TOOL_REPEATS` | `3` | Max repeated/mutated tool calls allowed in window |
+| `-cb-max-tool-errors` | `CB_MAX_TOOL_ERRORS` | `4` | Max accumulated tool execution errors allowed in window |
 | `-cb-max-hamming-dist` | `CB_MAX_HAMMING_DIST` | `3` | Max SimHash Hamming distance for near-duplicate loop detection (0-64) |
 | `-cb-jaccard-threshold` | `CB_JACCARD_THRESHOLD` | `0.85` | Jaccard similarity threshold for near-duplicate tool calls (0.0 to 1.0) |
 | `-velocity-enabled` | `VELOCITY_ENABLED` | `true` | Enable session-based velocity detection |

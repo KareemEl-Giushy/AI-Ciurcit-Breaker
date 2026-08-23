@@ -55,15 +55,16 @@ type ChatCompletionChunk struct {
 // RealtimeResponseReader wraps an io.ReadCloser (upstream response body)
 // to stream and pretty-print LLM text and tool calls directly to stdout in real-time,
 // calculate zero-allocation Shannon token/byte entropy on the fly,
-// enforce active circuit breaking (Class A repetition / Class B errors),
+// enforce active circuit breaking (tool repetition loops / error accumulation),
 // and invoke a callback upon completion with the captured response.
 type RealtimeResponseReader struct {
-	src            io.ReadCloser
-	contentType    string
-	logger         *slog.Logger
-	requestPath    string
-	circuitBreaker *CircuitBreakerEngine
-	onComplete     func(RecordedResponse)
+	src               io.ReadCloser
+	contentType       string
+	logger            *slog.Logger
+	requestPath       string
+	circuitBreaker    *CircuitBreakerEngine
+	showSlidingWindow bool
+	onComplete        func(RecordedResponse)
 
 	mu              sync.Mutex
 	isSSE           bool
@@ -105,6 +106,13 @@ func (r *RealtimeResponseReader) SetCircuitBreaker(cb *CircuitBreakerEngine) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.circuitBreaker = cb
+}
+
+// SetShowSlidingWindow sets whether to suppress console streaming in favor of sliding window display.
+func (r *RealtimeResponseReader) SetShowSlidingWindow(show bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.showSlidingWindow = show
 }
 
 // SetOnCompleteCallback registers a callback to receive the structured RecordedResponse.
@@ -155,7 +163,9 @@ func (r *RealtimeResponseReader) Read(p []byte) (int, error) {
 func (r *RealtimeResponseReader) ensureHeader() {
 	if !r.streamStarted {
 		r.streamStarted = true
-		utils.PrintStreamHeader(r.requestPath, r.modelName)
+		if !r.showSlidingWindow {
+			utils.PrintStreamHeader(r.requestPath, r.modelName)
+		}
 	}
 }
 
@@ -193,7 +203,9 @@ func (r *RealtimeResponseReader) processSSEChunk(chunk []byte) {
 					if choice.Delta.Content != "" {
 						r.ensureHeader()
 						r.accumulatedSSE.WriteString(choice.Delta.Content)
-						utils.PrintStreamToken(choice.Delta.Content)
+						if !r.showSlidingWindow {
+							utils.PrintStreamToken(choice.Delta.Content)
+						}
 					}
 
 					// 2. Handle streaming tool calls
@@ -219,11 +231,15 @@ func (r *RealtimeResponseReader) processSSEChunk(chunk []byte) {
 							}
 							if tc.Function.Name != "" {
 								acc.Function.Name += tc.Function.Name
-								utils.PrintStreamToolCallHeader(acc.Function.Name)
+								if !r.showSlidingWindow {
+									utils.PrintStreamToolCallHeader(acc.Function.Name)
+								}
 							}
 							if tc.Function.Arguments != "" {
 								acc.Function.Arguments += tc.Function.Arguments
-								utils.PrintStreamToolCallArg(tc.Function.Arguments)
+								if !r.showSlidingWindow {
+									utils.PrintStreamToolCallArg(tc.Function.Arguments)
+								}
 							}
 						}
 					}
@@ -269,15 +285,28 @@ func (r *RealtimeResponseReader) onCompleteHandler() {
 	streamEntropy := r.entropy.CumulativeEntropy()
 
 	if r.isSSE {
-		if r.streamStarted {
+		if r.streamStarted && !r.showSlidingWindow {
 			utils.PrintStreamFooter(len(r.toolCallsAcc) > 0, streamEntropy)
 		}
 
 		if r.trippedIncident != nil {
+			var violatingCalls []utils.SREViolatingCall
+			for _, vc := range r.trippedIncident.ViolatingCalls {
+				violatingCalls = append(violatingCalls, utils.SREViolatingCall{
+					ToolName:  vc.ToolName,
+					Arguments: vc.Arguments,
+					Error:     vc.Error,
+					Distance:  vc.HammingDistance,
+					Score:     vc.SimilarityScore,
+				})
+			}
+
 			utils.PrintSREIncident("CIRCUIT BREAKER TRIPPED", utils.SREIncidentSummary{
 				IncidentID:      r.trippedIncident.IncidentID,
 				FailureClass:    r.trippedIncident.FailureClass,
 				ToolName:        r.trippedIncident.ToolName,
+				ToolArguments:   r.trippedIncident.ToolArguments,
+				ViolatingCalls:  violatingCalls,
 				Fingerprint:     r.trippedIncident.Fingerprint,
 				SimHashHex:      r.trippedIncident.SimHashHex,
 				HammingDistance: r.trippedIncident.HammingDistance,
@@ -327,16 +356,18 @@ func (r *RealtimeResponseReader) onCompleteHandler() {
 					Entropy:   streamEntropy,
 				}
 
-				var printTools []utils.PrintToolCall
-				for _, tc := range choice.Message.ToolCalls {
-					printTools = append(printTools, utils.PrintToolCall{
-						ID:        tc.ID,
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					})
-				}
+				if !r.showSlidingWindow {
+					var printTools []utils.PrintToolCall
+					for _, tc := range choice.Message.ToolCalls {
+						printTools = append(printTools, utils.PrintToolCall{
+							ID:        tc.ID,
+							Name:      tc.Function.Name,
+							Arguments: tc.Function.Arguments,
+						})
+					}
 
-				utils.PrintNonStreamingResponse(r.requestPath, respObj.Model, content, printTools, streamEntropy)
+					utils.PrintNonStreamingResponse(r.requestPath, respObj.Model, content, printTools, streamEntropy)
+				}
 
 				r.logger.Info("llm response completed",
 					slog.String("path", r.requestPath),

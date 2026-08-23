@@ -18,9 +18,9 @@ It intercepts requests across any URL path and query string, reads and parses Op
 - **Session Velocity Detection**:
   - **Max RPS (`max_rps: 5.0`)**: Enforces maximum requests per second per session over a 1-second rolling window.
   - **Max Endpoint Repeats (`max_endpoint_repeats: 20` in `10s`)**: Blocks runaway recursion or retry storms hammering a single endpoint.
-- **Sliding-Window Repetition & Error Detection**:
-  - **Class A**: Identical / SimHash near-duplicate tool-call loops (default limit: `3`).
-  - **Class B**: Tool error accumulation loops (default limit: `4`).
+- **Tool Repetition & Error Accumulation Circuit Breakers**:
+  - **Tool Repetition Loop**: Halts identical or SimHash near-duplicate tool-call recursion (default limit: `3`).
+  - **Tool Error Accumulation**: Blocks cascading tool failures and error retry storms (default limit: `4`).
 - **Active Stream Termination & Structured SRE JSON**: Immediately halts runaway streams and returns structured SRE incident JSON with root-cause diagnostics, observed count, and mitigation instructions.
 - **Zero-Allocation Stream Entropy Engine**: Computes real-time Shannon entropy ($0.0 - 8.0$ bits/byte) on incoming token and byte streams with $0\text{ B/op}$ heap allocations to detect model degeneration.
 - **Conversation History Visualizer**: Pretty-prints the most recent interaction turn with color-coded role badges (⚙️ System, 👤 User, 🤖 Assistant, 🛠️ Tool output).
@@ -65,6 +65,8 @@ go run main.go \
   -port 8080 \
   -target http://localhost:3000 \
   -window-duration 60s \
+  -cb-max-tool-repeats 3 \
+  -cb-max-tool-errors 4 \
   -cb-max-hamming-dist 3 \
   -velocity-max-rps 5.0 \
   -enforce-limits=true
@@ -93,9 +95,10 @@ All settings can be specified via YAML in [`config.yaml`](file:///home/kareem/Do
 | `-window-max-requests` | `WINDOW_MAX_REQUESTS` | `0` | Max requests allowed in sliding window (0 = unlimited) |
 | `-window-max-tokens` | `WINDOW_MAX_TOKENS` | `0` | Max estimated tokens in sliding window (0 = unlimited) |
 | `-enforce-limits` | `ENFORCE_LIMITS` | `false` | If `true`, rejects requests exceeding window thresholds with HTTP 429 |
+| `-show-sliding-window` | `SHOW_SLIDING_WINDOW` | `false` | Display visual Sliding Window dashboard with real-time entropy and active tool call parameters |
 | `-cb-enabled` | `CB_ENABLED` | `true` | Enable tool-call loop and error accumulation circuit breaker |
-| `-cb-class-a-limit` | `CB_CLASS_A_LIMIT` | `3` | Max identical/similar tool calls allowed in window |
-| `-cb-class-b-limit` | `CB_CLASS_B_LIMIT` | `4` | Max accumulated tool execution errors allowed in window |
+| `-cb-max-tool-repeats` | `CB_MAX_TOOL_REPEATS` | `3` | Max identical/similar tool calls allowed before tripping tool loop breaker |
+| `-cb-max-tool-errors` | `CB_MAX_TOOL_ERRORS` | `4` | Max accumulated tool execution errors allowed before tripping error breaker |
 | `-cb-max-hamming-dist` | `CB_MAX_HAMMING_DIST` | `3` | Max SimHash Hamming distance for near-duplicate loop detection (0-64) |
 | `-cb-jaccard-threshold` | `CB_JACCARD_THRESHOLD` | `0.85` | Jaccard similarity threshold for near-duplicate tool calls (0.0 to 1.0) |
 | `-velocity-enabled` | `VELOCITY_ENABLED` | `true` | Enable session-based velocity detection |
