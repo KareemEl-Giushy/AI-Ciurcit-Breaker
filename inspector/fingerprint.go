@@ -51,8 +51,8 @@ func ComputeSimHash(toolName string, args string) uint64 {
 	if strings.TrimSpace(combined) == "" {
 		return 0
 	}
-	shingles := defaultSimhash.Shingle(3, [][]byte{[]byte(combined)})
-	return defaultSimhash.SimhashBytes(shingles)
+
+	return defaultSimhash.BuildSimhash(combined, simhash.Doc2words)
 }
 
 // SimHashHexString formats a 64-bit SimHash into a canonical 16-character hexadecimal string.

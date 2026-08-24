@@ -295,6 +295,29 @@ func TestCircuitBreaker_CheckRequestHistory(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker_CheckRequestHistory_AllowsRecoveredRetries(t *testing.T) {
+	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
+		MaxToolRepeats:     3,
+		MaxToolErrors:      4,
+		MaxHammingDistance: 3,
+		JaccardThreshold:   0.85,
+		Enabled:            true,
+	})
+
+	messages := []ChatMessage{
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Function: FunctionCall{Name: "fetch_url", Arguments: `{"url":"https://flaky-api.example.com/status"}`}}}},
+		{Role: "tool", ToolCallID: "call_1", Content: `{"error":"503 service unavailable"}`},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_2", Function: FunctionCall{Name: "fetch_url", Arguments: `{"url":"https://flaky-api.example.com/status"}`}}}},
+		{Role: "tool", ToolCallID: "call_2", Content: `{"error":"503 service unavailable"}`},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_3", Function: FunctionCall{Name: "fetch_url", Arguments: `{"url":"https://flaky-api.example.com/status"}`}}}},
+		{Role: "tool", ToolCallID: "call_3", Content: `{"status":200,"body":"ok"}`},
+	}
+
+	if incident, tripped := cb.CheckRequestHistory(messages); tripped || incident != nil {
+		t.Fatalf("expected recovered retries to be allowed, got incident: %+v", incident)
+	}
+}
+
 func TestCircuitBreaker_LowEntropyDegeneration(t *testing.T) {
 	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
 		WindowDuration:      1 * time.Minute,

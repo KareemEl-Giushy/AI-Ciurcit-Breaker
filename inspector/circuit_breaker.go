@@ -3,6 +3,7 @@ package inspector
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -245,7 +246,11 @@ func (cb *CircuitBreakerEngine) RecordToolCall(toolName, args string, isError bo
 		simHashScore := SimHashSimilarity(e.SimHash, simhash)
 		jaccardScore := JaccardSimilarity(normArgs, NormalizeJSONArgs(e.Args))
 
-		isSimHashMatch := dist <= cb.config.MaxHammingDistance
+		// SimHash tokenization can collapse distinct structured values (for
+		// example account IDs). For JSON arguments, use Jaccard similarity; keep
+		// SimHash for free-form arguments where it detects prompt mutations.
+		isStructuredArgs := json.Valid([]byte(normArgs)) && json.Valid([]byte(NormalizeJSONArgs(e.Args)))
+		isSimHashMatch := !isStructuredArgs && dist <= cb.config.MaxHammingDistance
 		isJaccardMatch := jaccardScore >= cb.config.JaccardThreshold
 
 		if isSimHashMatch || isJaccardMatch {
@@ -349,6 +354,16 @@ func (cb *CircuitBreakerEngine) CheckRequestHistory(messages []ChatMessage) (*SR
 
 	var recordedCalls []recordedCall
 	errorCount := 0
+	// A failed call and a subsequent retry are governed by the error-accumulation
+	// rule. Do not also treat failed attempts as a repetition loop. Build this
+	// lookup first because tool results follow assistant calls in the history.
+	failedToolCallIDs := make(map[string]bool)
+	for _, msg := range messages {
+		role := strings.ToLower(msg.Role)
+		if (role == "tool" || role == "function") && msg.ToolCallID != "" && IsToolResponseError(msg.ContentString()) {
+			failedToolCallIDs[msg.ToolCallID] = true
+		}
+	}
 
 	for _, msg := range messages {
 		// 1. Check for Low Entropy / Model Degeneration in conversation turns
@@ -393,6 +408,12 @@ func (cb *CircuitBreakerEngine) CheckRequestHistory(messages []ChatMessage) (*SR
 				}, true
 			}
 
+			// Count failed executions through error accumulation instead of treating
+			// a bounded retry sequence as a successful recursive tool loop.
+			if failedToolCallIDs[tc.ID] {
+				continue
+			}
+
 			current := recordedCall{
 				name:     tc.Function.Name,
 				args:     tc.Function.Arguments,
@@ -418,7 +439,11 @@ func (cb *CircuitBreakerEngine) CheckRequestHistory(messages []ChatMessage) (*SR
 				simHashScore := SimHashSimilarity(prev.simhash, current.simhash)
 				jaccardScore := JaccardSimilarity(prev.normArgs, current.normArgs)
 
-				isSimHashMatch := dist <= cb.config.MaxHammingDistance
+				// SimHash tokenization can collapse distinct structured values (for
+				// example account IDs). For JSON arguments, use Jaccard similarity;
+				// keep SimHash for free-form arguments where it detects mutations.
+				isStructuredArgs := json.Valid([]byte(prev.normArgs)) && json.Valid([]byte(current.normArgs))
+				isSimHashMatch := !isStructuredArgs && dist <= cb.config.MaxHammingDistance
 				isJaccardMatch := jaccardScore >= cb.config.JaccardThreshold
 
 				if isSimHashMatch || isJaccardMatch {
