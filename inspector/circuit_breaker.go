@@ -136,7 +136,7 @@ func IsToolResponseError(content string) bool {
 	lower := strings.ToLower(content)
 	indicators := []string{
 		`"error":`, `"status":"error"`, `"status": "error"`,
-		`"failed"`, `exception:`, `traceback`, `permission denied`,
+		`"failed"`, `exception:`, `"exception":`, `traceback`, `permission denied`,
 		`not found`, `timed out`, `internal server error`,
 	}
 	for _, ind := range indicators {

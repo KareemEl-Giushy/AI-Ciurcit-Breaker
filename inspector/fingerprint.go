@@ -48,11 +48,11 @@ func ComputeSimHash(toolName string, args string) uint64 {
 	normalizedArgs := NormalizeJSONArgs(args)
 	combined := toolName + " " + normalizedArgs
 
-	if combined == "" || combined == " " {
+	if strings.TrimSpace(combined) == "" {
 		return 0
 	}
-
-	return defaultSimhash.BuildSimhash(combined, simhash.Doc2words)
+	shingles := defaultSimhash.Shingle(3, [][]byte{[]byte(combined)})
+	return defaultSimhash.SimhashBytes(shingles)
 }
 
 // SimHashHexString formats a 64-bit SimHash into a canonical 16-character hexadecimal string.
