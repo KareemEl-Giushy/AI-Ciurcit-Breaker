@@ -105,6 +105,7 @@ All settings can be specified via YAML in [`config.yaml`](file:///home/kareem/Do
 | `-cb-max-tool-errors` | `CB_MAX_TOOL_ERRORS` | `4` | Max accumulated tool execution errors allowed before tripping error breaker |
 | `-cb-max-hamming-dist` | `CB_MAX_HAMMING_DIST` | `3` | Max SimHash Hamming distance for near-duplicate loop detection (0-64) |
 | `-cb-jaccard-threshold` | `CB_JACCARD_THRESHOLD` | `0.85` | Jaccard similarity threshold for near-duplicate tool calls (0.0 to 1.0) |
+| `-cb-min-entropy` | `CB_MIN_ENTROPY` | `1.5` | Min Shannon entropy threshold (bits/byte) to prevent model degeneration |
 | `-velocity-enabled` | `VELOCITY_ENABLED` | `true` | Enable session-based velocity detection |
 | `-velocity-max-rps` | `VELOCITY_MAX_RPS` | `5.0` | Max allowed requests per second per session (0 = disabled) |
 | `-velocity-max-endpoint-repeats` | `VELOCITY_MAX_ENDPOINT_REPEATS` | `20` | Max hits to same endpoint in window (0 = disabled) |

@@ -37,14 +37,15 @@ func main() {
 		EnforceLimits:  cfg.EnforceLimits,
 	})
 
-	// Initialize Circuit Breaker Engine with SimHash and Jaccard
+	// Initialize Circuit Breaker Engine with SimHash, Jaccard, and Entropy Degeneration
 	cbEngine := inspector.NewCircuitBreakerEngine(inspector.CircuitBreakerConfig{
-		WindowDuration:     cfg.WindowDuration,
-		MaxToolRepeats:     cfg.CBMaxToolRepeats,
-		MaxToolErrors:      cfg.CBMaxToolErrors,
-		MaxHammingDistance: cfg.CBMaxHammingDist,
-		JaccardThreshold:   cfg.CBJaccardThreshold,
-		Enabled:            cfg.CBEnabled,
+		WindowDuration:      cfg.WindowDuration,
+		MaxToolRepeats:      cfg.CBMaxToolRepeats,
+		MaxToolErrors:       cfg.CBMaxToolErrors,
+		MaxHammingDistance:  cfg.CBMaxHammingDist,
+		JaccardThreshold:    cfg.CBJaccardThreshold,
+		MinEntropyThreshold: cfg.CBMinEntropy,
+		Enabled:             cfg.CBEnabled,
 	})
 
 	// Initialize Velocity Detection Engine
@@ -82,7 +83,7 @@ func main() {
 	utils.PrintStartupBanner(
 		cfg.Port, cfg.TargetURLString,
 		cfg.WindowDuration, cfg.MaxRequests, cfg.MaxTokens, cfg.EnforceLimits,
-		cfg.CBMaxToolRepeats, cfg.CBMaxToolErrors, cfg.CBMaxHammingDist, cfg.CBJaccardThreshold,
+		cfg.CBMaxToolRepeats, cfg.CBMaxToolErrors, cfg.CBMaxHammingDist, cfg.CBJaccardThreshold, cfg.CBMinEntropy,
 		cfg.VelocityMaxRPS, cfg.VelocityMaxEndpointRepeats, cfg.VelocityRepeatWindow,
 		cfg.SaveConversations, cfg.SaveDir,
 	)

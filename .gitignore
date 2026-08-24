@@ -6,3 +6,4 @@ utils/*_test.go
 conversations/*
 !conversations/.gitkeep
 start.sh
+scenarios/

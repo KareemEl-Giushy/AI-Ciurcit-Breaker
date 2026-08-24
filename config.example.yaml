@@ -132,6 +132,16 @@ circuit_breaker:
   # Default  : 0.85
   jaccard_threshold: 0.85
 
+  # Minimum Shannon Entropy Threshold (Model Degeneration Prevention):
+  # Minimum Shannon information entropy (in bits/byte, range 0.0 - 8.0) allowed for
+  # streaming output tokens, tool arguments, or message content. If entropy drops
+  # below this threshold (e.g. repetitive token spam collapse like "! ! ! !"), the breaker
+  # trips with MODEL_DEGENERATION_LOW_ENTROPY. Set to 0.0 to disable.
+  # CLI Flag : -cb-min-entropy
+  # Env Var  : CB_MIN_ENTROPY
+  # Default  : 1.5
+  min_entropy_threshold: 1.5
+
 
 # ------------------------------------------------------------------------------
 # 4. VELOCITY DETECTION (High-Frequency Throughput & Hammering Prevention)

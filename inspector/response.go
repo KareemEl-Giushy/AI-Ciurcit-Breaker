@@ -206,6 +206,26 @@ func (r *RealtimeResponseReader) processSSEChunk(chunk []byte) {
 						if !r.showSlidingWindow {
 							utils.PrintStreamToken(choice.Delta.Content)
 						}
+
+						// Evaluate circuit breaker stream entropy / model degeneration in real-time
+						if r.circuitBreaker != nil {
+							curEntropy := r.entropy.CumulativeEntropy()
+							if incident, tripped := r.circuitBreaker.CheckStreamEntropy(curEntropy, r.entropy.TotalBytes()); tripped {
+								r.trippedIncident = incident
+								r.logger.Warn("circuit breaker tripped during streaming - low entropy model degeneration detected",
+									slog.String("failure_class", incident.FailureClass),
+									slog.Float64("entropy", incident.Entropy),
+								)
+
+								sreResp := SREErrorResponse{SREIncident: *incident}
+								sreBytes, _ := json.Marshal(sreResp)
+								r.injectedError = fmt.Appendf(nil, "\nevent: error\ndata: %s\n\n", string(sreBytes))
+
+								_ = r.src.Close()
+								r.onCompleteHandler()
+								return
+							}
+						}
 					}
 
 					// 2. Handle streaming tool calls
@@ -298,6 +318,7 @@ func (r *RealtimeResponseReader) onCompleteHandler() {
 					Error:     vc.Error,
 					Distance:  vc.HammingDistance,
 					Score:     vc.SimilarityScore,
+					Entropy:   vc.Entropy,
 				})
 			}
 
@@ -307,10 +328,10 @@ func (r *RealtimeResponseReader) onCompleteHandler() {
 				ToolName:        r.trippedIncident.ToolName,
 				ToolArguments:   r.trippedIncident.ToolArguments,
 				ViolatingCalls:  violatingCalls,
-				Fingerprint:     r.trippedIncident.Fingerprint,
 				SimHashHex:      r.trippedIncident.SimHashHex,
 				HammingDistance: r.trippedIncident.HammingDistance,
 				SimilarityScore: r.trippedIncident.SimilarityScore,
+				Entropy:         r.trippedIncident.Entropy,
 				ObservedCount:   r.trippedIncident.ObservedCount,
 				Threshold:       r.trippedIncident.Threshold,
 				Mitigation:      r.trippedIncident.Mitigation,

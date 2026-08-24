@@ -264,6 +264,7 @@ func NewServerHandler(cfg Config) http.Handler {
 						Error:     vc.Error,
 						Distance:  vc.HammingDistance,
 						Score:     vc.SimilarityScore,
+						Entropy:   vc.Entropy,
 					})
 				}
 
@@ -273,10 +274,10 @@ func NewServerHandler(cfg Config) http.Handler {
 					ToolName:        incident.ToolName,
 					ToolArguments:   incident.ToolArguments,
 					ViolatingCalls:  violatingCalls,
-					Fingerprint:     incident.Fingerprint,
 					SimHashHex:      incident.SimHashHex,
 					HammingDistance: incident.HammingDistance,
 					SimilarityScore: incident.SimilarityScore,
+					Entropy:         incident.Entropy,
 					ObservedCount:   incident.ObservedCount,
 					Threshold:       incident.Threshold,
 					Mitigation:      incident.Mitigation,

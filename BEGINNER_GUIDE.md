@@ -189,10 +189,11 @@ When a request arrives at `http://localhost:8080/v1/chat/completions`:
 **Location**: [`inspector/circuit_breaker.go`](file:///home/kareem/Documents/DevOps%20Hackathon/Circuit%20Breaker/inspector/circuit_breaker.go)
 
 #### What it does:
-Maintains thread-safe rolling history of tool calls:
+Maintains thread-safe rolling history of tool calls and stream health:
 - **Tool Repetition Loop (`TOOL_CALL_REPETITION_LOOP`)**: Trips when identical or SimHash near-duplicate tool calls ($D_H \le 3$) reach `MaxToolRepeats` (default: 3).
 - **Tool Error Accumulation (`TOOL_ERROR_ACCUMULATION`)**: Trips when accumulated tool failures reach `MaxToolErrors` (default: 4).
-- **Structured SRE Incident with Violating Calls Breakdown**: Emits structured JSON and terminal alerts with `IncidentID`, `FailureClass`, `ToolName`, `ToolArguments`, `ViolatingCalls` (array of participating tool names, arguments, SimHash distance, and similarity scores), `Mitigation`, and `ActionRequired`.
+- **Model Degeneration & Low Entropy (`MODEL_DEGENERATION_LOW_ENTROPY`)**: Calculates real-time Shannon entropy using the zero-allocation `EntropyCalculator`. If tool arguments, request message content, or streaming tokens drop below `MinEntropyThreshold` (default: 1.5 bits/byte, e.g. token spam collapse like `! ! ! ! !`), the breaker trips immediately and halts the stream.
+- **Structured SRE Incident with Violating Calls Breakdown**: Emits structured JSON and terminal alerts with `IncidentID`, `FailureClass`, `ToolName`, `ToolArguments`, `Entropy`, `ViolatingCalls` (array of participating tool names, arguments, SimHash distance, and similarity scores), `Mitigation`, and `ActionRequired`.
 
 ---
 
@@ -224,7 +225,7 @@ Calculates **Shannon Information Entropy** ($H(X) = -\sum p(x) \log_2 p(x)$) on 
 Wraps `resp.Body`:
 - Prints streaming tokens and tool calls live to stdout.
 - Computes stream entropy on-the-fly.
-- Actively closes the upstream connection and injects SRE incident JSON if the circuit breaker trips mid-stream.
+- Actively closes the upstream connection and injects SRE incident JSON if the circuit breaker trips mid-stream (for tool loops or low-entropy degeneration).
 
 ---
 
@@ -282,6 +283,7 @@ circuit_breaker:
   max_tool_errors: 4
   max_hamming_distance: 3
   jaccard_threshold: 0.85
+  min_entropy_threshold: 1.5
 
 velocity:
   enabled: true

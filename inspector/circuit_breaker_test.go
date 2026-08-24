@@ -294,3 +294,49 @@ func TestCircuitBreaker_CheckRequestHistory(t *testing.T) {
 		t.Errorf("expected FailureClassErrorAccumulation, got %s", incidentB.FailureClass)
 	}
 }
+
+func TestCircuitBreaker_LowEntropyDegeneration(t *testing.T) {
+	cb := NewCircuitBreakerEngine(CircuitBreakerConfig{
+		WindowDuration:      1 * time.Minute,
+		MinEntropyThreshold: 1.5,
+		Enabled:             true,
+	})
+
+	// 1. Tool argument with repetitive collapsed character spam (extremely low entropy, ~0.0 bits/byte)
+	repetitiveArgs := `{"query": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`
+	incident, tripped := cb.RecordToolCall("search_db", repetitiveArgs, false, "")
+	if !tripped || incident == nil {
+		t.Fatalf("expected low entropy tool arguments to trip circuit breaker")
+	}
+	if incident.FailureClass != FailureClassLowEntropy {
+		t.Errorf("expected %s, got %s", FailureClassLowEntropy, incident.FailureClass)
+	}
+	if incident.Entropy >= 1.5 {
+		t.Errorf("expected entropy < 1.5, got %f", incident.Entropy)
+	}
+	if len(incident.ViolatingCalls) == 0 {
+		t.Errorf("expected violating calls to be populated for low entropy incident")
+	}
+
+	// 2. Stream evaluation check
+	incidentStream, trippedStream := cb.CheckStreamEntropy(0.85, 128)
+	if !trippedStream || incidentStream == nil {
+		t.Fatalf("expected stream entropy < 1.5 with >= 64 bytes to trip circuit breaker")
+	}
+	if incidentStream.FailureClass != FailureClassLowEntropy {
+		t.Errorf("expected %s, got %s", FailureClassLowEntropy, incidentStream.FailureClass)
+	}
+
+	// 3. Conversation history with low entropy message text
+	messagesWithSpam := []ChatMessage{
+		{Role: "user", Content: "Tell me something."},
+		{Role: "assistant", Content: "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"},
+	}
+	incidentHist, trippedHist := cb.CheckRequestHistory(messagesWithSpam)
+	if !trippedHist || incidentHist == nil {
+		t.Fatalf("expected low entropy conversation text to trip circuit breaker")
+	}
+	if incidentHist.FailureClass != FailureClassLowEntropy {
+		t.Errorf("expected %s, got %s", FailureClassLowEntropy, incidentHist.FailureClass)
+	}
+}

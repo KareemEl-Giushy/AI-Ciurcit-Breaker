@@ -32,6 +32,7 @@ type SREViolatingCall struct {
 	Error     string
 	Distance  int
 	Score     float64
+	Entropy   float64
 }
 
 // SREIncidentSummary contains incident details for formatted terminal alerts.
@@ -45,6 +46,7 @@ type SREIncidentSummary struct {
 	SimHashHex      string
 	HammingDistance int
 	SimilarityScore float64
+	Entropy         float64
 	ObservedCount   int
 	Threshold       int
 	Mitigation      string
@@ -52,7 +54,7 @@ type SREIncidentSummary struct {
 }
 
 // PrintStartupBanner outputs the stylized ASCII application banner and active configuration settings.
-func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTok int, enforce bool, cbMaxToolRepeats, cbMaxToolErrors, cbHamming int, cbJaccard float64, maxRPS float64, maxEndpointRepeats int, repeatWindow time.Duration, saveConv bool, saveDir string) {
+func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTok int, enforce bool, cbMaxToolRepeats, cbMaxToolErrors, cbHamming int, cbJaccard float64, cbMinEntropy float64, maxRPS float64, maxEndpointRepeats int, repeatWindow time.Duration, saveConv bool, saveDir string) {
 	fmt.Printf("\n%s%s╔══════════════════════════════════════════════════════════════════════════════╗%s\n", ColorCyan, ColorBold, ColorReset)
 	fmt.Printf("%s%s║                ⚡ CIRCUIT BREAKER REVERSE PROXY & INSPECTOR                 ║%s\n", ColorCyan, ColorBold, ColorReset)
 	fmt.Printf("%s%s╚══════════════════════════════════════════════════════════════════════════════╝%s\n", ColorCyan, ColorBold, ColorReset)
@@ -65,6 +67,7 @@ func PrintStartupBanner(port, target string, window time.Duration, maxReq, maxTo
 	fmt.Printf("  %s• CB Tool Loop Limit :%s %d identical/similar calls\n", ColorBold, ColorReset, cbMaxToolRepeats)
 	fmt.Printf("  %s• CB SimHash Max Dist:%s %d bits (64-bit LSH)\n", ColorBold, ColorReset, cbHamming)
 	fmt.Printf("  %s• CB Jaccard Thresh  :%s %.2f similarity index\n", ColorBold, ColorReset, cbJaccard)
+	fmt.Printf("  %s• CB Min Entropy     :%s %.2f bits/byte (model degeneration threshold)\n", ColorBold, ColorReset, cbMinEntropy)
 	fmt.Printf("  %s• CB Tool Error Limit:%s %d accumulated errors\n", ColorBold, ColorReset, cbMaxToolErrors)
 	fmt.Printf("  %s• Velocity Max RPS   :%s %.1f req/s (0 = unlimited)\n", ColorBold, ColorReset, maxRPS)
 	fmt.Printf("  %s• Velocity Max Repeat:%s %d hits in %s\n", ColorBold, ColorReset, maxEndpointRepeats, repeatWindow)
@@ -163,6 +166,8 @@ func PrintSREIncident(title string, incident SREIncidentSummary) {
 				extra = fmt.Sprintf(" [SimHash Dist: %d, Sim: %.2f]", vc.Distance, vc.Score)
 			} else if vc.Error != "" {
 				extra = fmt.Sprintf(" [Error: %s]", vc.Error)
+			} else if vc.Entropy > 0 {
+				extra = fmt.Sprintf(" [Entropy: %.2f bits/byte]", vc.Entropy)
 			}
 			fmt.Printf("%s│%s   %s[%d]%s %s%s%s(args: %s%s%s)%s%s\n",
 				ColorRed, ColorReset,
@@ -172,6 +177,18 @@ func PrintSREIncident(title string, incident SREIncidentSummary) {
 				ColorReset, extra,
 			)
 		}
+	}
+	if incident.Entropy > 0 {
+		var entropyQuality string
+		switch {
+		case incident.Entropy < 2.0:
+			entropyQuality = fmt.Sprintf("%s[Low Diversity / Degeneration Risk]%s", ColorRed, ColorReset)
+		case incident.Entropy < 3.5:
+			entropyQuality = fmt.Sprintf("%s[Moderate Diversity]%s", ColorYellow, ColorReset)
+		default:
+			entropyQuality = fmt.Sprintf("%s[Optimal / High Diversity]%s", ColorGreen, ColorReset)
+		}
+		fmt.Printf("%s│%s • Stream Entropy: %s%.2f bits/byte%s %s\n", ColorRed, ColorReset, ColorBold, incident.Entropy, ColorReset, entropyQuality)
 	}
 	if incident.SimHashHex != "" {
 		fmt.Printf("%s│%s • SimHash (LSH) : %s (Hamming Dist: %d bits)\n", ColorRed, ColorReset, incident.SimHashHex, incident.HammingDistance)

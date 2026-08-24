@@ -28,11 +28,12 @@ type YAMLConfig struct {
 		ShowInTerminal *bool  `yaml:"show_in_terminal"`
 	} `yaml:"sliding_window"`
 	CircuitBreaker struct {
-		Enabled            *bool    `yaml:"enabled"`
-		MaxToolRepeats     *int     `yaml:"max_tool_repeats"`
-		MaxToolErrors      *int     `yaml:"max_tool_errors"`
-		MaxHammingDistance *int     `yaml:"max_hamming_distance"`
-		JaccardThreshold   *float64 `yaml:"jaccard_threshold"`
+		Enabled             *bool    `yaml:"enabled"`
+		MaxToolRepeats      *int     `yaml:"max_tool_repeats"`
+		MaxToolErrors       *int     `yaml:"max_tool_errors"`
+		MaxHammingDistance  *int     `yaml:"max_hamming_distance"`
+		JaccardThreshold    *float64 `yaml:"jaccard_threshold"`
+		MinEntropyThreshold *float64 `yaml:"min_entropy_threshold"`
 	} `yaml:"circuit_breaker"`
 	Velocity struct {
 		Enabled            *bool    `yaml:"enabled"`
@@ -68,6 +69,7 @@ type AppConfig struct {
 	CBMaxToolErrors    int
 	CBMaxHammingDist   int
 	CBJaccardThreshold float64
+	CBMinEntropy       float64
 
 	// Velocity Detection
 	VelocityEnabled            bool
@@ -150,6 +152,9 @@ func (cfg *AppConfig) Validate() error {
 	}
 	if cfg.CBJaccardThreshold <= 0.0 || cfg.CBJaccardThreshold > 1.0 {
 		return fmt.Errorf("circuit breaker Jaccard threshold must be in range (0.0, 1.0], got %f", cfg.CBJaccardThreshold)
+	}
+	if cfg.CBMinEntropy < 0.0 || cfg.CBMinEntropy > 8.0 {
+		return fmt.Errorf("circuit breaker min entropy threshold must be in range [0.0, 8.0], got %f", cfg.CBMinEntropy)
 	}
 
 	if cfg.VelocityMaxRPS < 0 {
@@ -278,6 +283,12 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 	}
 	defaultCBJaccard = GetEnvFloat("CB_JACCARD_THRESHOLD", defaultCBJaccard)
 
+	defaultCBMinEntropy := 1.5
+	if yamlCfg != nil && yamlCfg.CircuitBreaker.MinEntropyThreshold != nil {
+		defaultCBMinEntropy = *yamlCfg.CircuitBreaker.MinEntropyThreshold
+	}
+	defaultCBMinEntropy = GetEnvFloat("CB_MIN_ENTROPY", defaultCBMinEntropy)
+
 	// 4. Resolve Velocity Defaults
 	defaultVelocityEnabled := true
 	if yamlCfg != nil && yamlCfg.Velocity.Enabled != nil {
@@ -334,6 +345,7 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 	cbMaxToolErrorsFlag := fs.Int("cb-max-tool-errors", defaultCBMaxToolErrors, "Max accumulated tool errors before tripping error accumulation circuit breaker")
 	cbHammingFlag := fs.Int("cb-max-hamming-dist", defaultCBHamming, "Max SimHash Hamming distance to treat tool calls as identical/near-duplicate (0-64 bits)")
 	cbJaccardFlag := fs.Float64("cb-jaccard-threshold", defaultCBJaccard, "Jaccard similarity threshold for detecting near-duplicate tool calls (0.0 to 1.0)")
+	cbMinEntropyFlag := fs.Float64("cb-min-entropy", defaultCBMinEntropy, "Min Shannon entropy threshold (bits/byte) to prevent model degeneration (0 to disable)")
 	velocityEnabledFlag := fs.Bool("velocity-enabled", defaultVelocityEnabled, "Enable session velocity detection")
 	velocityMaxRPSFlag := fs.Float64("velocity-max-rps", defaultVelocityMaxRPS, "Max allowed requests per second per session (0 for unlimited)")
 	velocityMaxRepeatsFlag := fs.Int("velocity-max-endpoint-repeats", defaultVelocityMaxRepeats, "Max hits to the same endpoint within repeat window (0 for unlimited)")
@@ -380,6 +392,7 @@ func ParseAndValidateConfig(args []string) (*AppConfig, error) {
 		CBMaxToolErrors:            *cbMaxToolErrorsFlag,
 		CBMaxHammingDist:           *cbHammingFlag,
 		CBJaccardThreshold:         *cbJaccardFlag,
+		CBMinEntropy:               *cbMinEntropyFlag,
 		VelocityEnabled:            *velocityEnabledFlag,
 		VelocityMaxRPS:             *velocityMaxRPSFlag,
 		VelocityMaxEndpointRepeats: *velocityMaxRepeatsFlag,

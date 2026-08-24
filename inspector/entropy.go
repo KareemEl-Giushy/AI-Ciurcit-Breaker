@@ -145,6 +145,16 @@ func (ec *EntropyCalculator) IsDegenerated(minSamples int, threshold float64) bo
 	return ec.RollingEntropy() < threshold
 }
 
+// CalculateStringEntropy calculates the Shannon entropy in bits/byte for a given string with 0 heap allocations.
+func CalculateStringEntropy(s string) float64 {
+	if len(s) == 0 {
+		return 0.0
+	}
+	ec := NewEntropyCalculator()
+	ec.AddToken(s)
+	return ec.CumulativeEntropy()
+}
+
 // Reset clears all counters and buffers in-place for reuse.
 func (ec *EntropyCalculator) Reset() {
 	for i := 0; i < 256; i++ {
